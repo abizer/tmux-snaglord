@@ -69,13 +69,14 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
     };
 
     // Convert ANSI escape codes to ratatui styled Text
+    // Show command + output together
     let content = if let Some(idx) = app.list_state.selected() {
         if let Some(block) = app.blocks.get(idx) {
-            block
-                .output
-                .as_bytes()
+            let full = format!("{}\n{}", block.command, block.output);
+            let bytes = full.into_bytes();
+            bytes
                 .into_text()
-                .unwrap_or_else(|_| block.output.as_str().into())
+                .unwrap_or_else(|_| "Error rendering".into())
         } else {
             "No selection".into()
         }
