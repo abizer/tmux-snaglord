@@ -10,9 +10,9 @@ use std::process::{Command, Stdio};
 /// - `-e`: preserve escape sequences (ANSI colors)
 /// - `-J`: join wrapped lines
 /// - `-p`: output to stdout
-/// - `-S -1000`: capture last 1000 lines (not full history, which includes stale content)
+/// - `-S -5000`: capture last 5000 lines (not full history, which includes stale content)
 pub fn capture_pane(pane_id: Option<&str>) -> Result<String> {
-    let mut args = vec!["capture-pane", "-e", "-J", "-p", "-S", "-1000"];
+    let mut args = vec!["capture-pane", "-e", "-J", "-p", "-S", "-5000"];
 
     if let Some(id) = pane_id {
         args.push("-t");
