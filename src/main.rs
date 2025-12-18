@@ -79,7 +79,10 @@ fn run_init(target: Option<&str>) -> Result<()> {
             let count = blocks.len();
 
             if count > 0 {
-                eprintln!("  {:12} {:3} commands  ({})", preset.name, count, preset.description);
+                eprintln!(
+                    "  {:12} {:3} commands  ({})",
+                    preset.name, count, preset.description
+                );
                 match best_match {
                     Some((_, best_count)) if count > best_count => {
                         best_match = Some((preset, count));
@@ -95,10 +98,7 @@ fn run_init(target: Option<&str>) -> Result<()> {
 
     match best_match {
         Some((preset, count)) => {
-            eprintln!(
-                "\nDetected '{}' ({} commands)",
-                preset.name, count
-            );
+            eprintln!("\nDetected '{}' ({} commands)", preset.name, count);
 
             let config = config::Config {
                 preset: Some(preset.name.to_string()),

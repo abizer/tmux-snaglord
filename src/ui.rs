@@ -13,6 +13,51 @@ use serde_json::Value;
 use crate::app::{App, Mode};
 use crate::parser::PathType;
 
+/// Powerline glyphs for capsule-style tabs
+const PL_LEFT_CAP: &str = "\u{e0b6}"; //
+const PL_RIGHT_CAP: &str = "\u{e0b4}"; //
+
+/// Build powerline-style mode tabs capsules
+fn build_mode_tabs(active_mode: Mode) -> Line<'static> {
+    let tabs = [
+        ("Commands", Color::Green, Mode::Commands),
+        ("JSON", Color::Blue, Mode::Json),
+        ("Paths", Color::Magenta, Mode::Paths),
+    ];
+
+    let mut spans = Vec::new();
+
+    for (i, (label, color, mode)) in tabs.iter().enumerate() {
+        let is_active = *mode == active_mode;
+
+        if i > 0 {
+            // Add spacing between tabs
+            spans.push(Span::raw("  "));
+        }
+
+        if is_active {
+            // Active tab: colored caps + inverted text (black on colored bg)
+            spans.push(Span::styled(PL_LEFT_CAP, Style::default().fg(*color)));
+            spans.push(Span::styled(
+                *label,
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(*color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(PL_RIGHT_CAP, Style::default().fg(*color)));
+        } else {
+            // Inactive tab: gray text, no caps but spaced to align
+            // Add phantom spacing to match cap widths
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(*label, Style::default().fg(Color::DarkGray)));
+            spans.push(Span::raw(" "));
+        }
+    }
+
+    Line::from(spans)
+}
+
 /// Render the application UI
 pub fn render(frame: &mut Frame, app: &mut App) {
     // Split into main area and footer (2 lines for border + text)
@@ -66,18 +111,7 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         .collect();
 
     // Build title with mode tabs and count info
-    let mode_tabs = Line::from(vec![
-        Span::styled(
-            "[1:Commands]",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" ", Style::default()),
-        Span::styled("[2:JSON]", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ", Style::default()),
-        Span::styled("[3:Paths]", Style::default().fg(Color::DarkGray)),
-    ]);
+    let mode_tabs = build_mode_tabs(Mode::Commands);
 
     // Left title: shows selection count if items are pinned, otherwise "Commands (X/Y)"
     let left_title = if !app.selection.is_empty() {
@@ -145,18 +179,7 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         .collect();
 
     // Build title with mode tabs
-    let mode_tabs = Line::from(vec![
-        Span::styled("[1:Commands]", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ", Style::default()),
-        Span::styled(
-            "[2:JSON]",
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" ", Style::default()),
-        Span::styled("[3:Paths]", Style::default().fg(Color::DarkGray)),
-    ]);
+    let mode_tabs = build_mode_tabs(Mode::Json);
 
     // Count info
     let count_title = if let Some(idx) = selected_idx {
@@ -246,18 +269,7 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
         .collect();
 
     // Build title with mode tabs
-    let mode_tabs = Line::from(vec![
-        Span::styled("[1:Commands]", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ", Style::default()),
-        Span::styled("[2:JSON]", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ", Style::default()),
-        Span::styled(
-            "[3:Paths]",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
+    let mode_tabs = build_mode_tabs(Mode::Paths);
 
     // Count info
     let count_title = if let Some(idx) = selected_idx {
