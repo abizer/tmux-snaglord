@@ -6,7 +6,9 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 
 use crate::action::Action;
-use crate::parser::{find_json_candidates, find_path_candidates, CommandBlock, JsonBlock, PathBlock};
+use crate::parser::{
+    CommandBlock, JsonBlock, PathBlock, find_json_candidates, find_path_candidates,
+};
 use crate::tmux;
 use crate::utils::{escape_debug, strip_ansi};
 

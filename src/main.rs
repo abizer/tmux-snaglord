@@ -22,7 +22,7 @@ use action::Action;
 use app::{App, UpdateResult};
 
 #[derive(Parser)]
-#[command(name = "tmux-copy-tool")]
+#[command(name = "tmux-snag")]
 #[command(about = "A TUI for copying terminal history from tmux")]
 struct Cli {
     /// Regex pattern to identify command prompts

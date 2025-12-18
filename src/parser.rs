@@ -420,9 +420,10 @@ pub fn find_path_candidates(blocks: &[CommandBlock]) -> Vec<PathBlock> {
     use std::collections::HashSet;
 
     // URL pattern: http, https, ftp, file, git, ssh protocols
-    let url_re =
-        Regex::new(r#"(?:https?|ftp|file|git|ssh)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"#)
-            .unwrap();
+    let url_re = Regex::new(
+        r#"(?:https?|ftp|file|git|ssh)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"#,
+    )
+    .unwrap();
 
     // Git SSH pattern: user@host:path
     let git_ssh_re = Regex::new(r#"[a-zA-Z0-9_.-]+@[a-zA-Z0-9.-]+:[a-zA-Z0-9_./-]+"#).unwrap();
@@ -514,9 +515,7 @@ pub fn find_path_candidates(blocks: &[CommandBlock]) -> Vec<PathBlock> {
                 let path_part = cap.get(1).unwrap().as_str().to_string();
 
                 // Skip common false positives
-                if path_part.contains("...")
-                    || path_part.ends_with('.')
-                    || path_part.ends_with('/')
+                if path_part.contains("...") || path_part.ends_with('.') || path_part.ends_with('/')
                 {
                     continue;
                 }

@@ -55,7 +55,13 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
             let block = &app.blocks[real_idx];
             let is_focused = selected_idx == Some(visual_idx);
             let is_pinned = app.selection.contains(&real_idx);
-            format_list_item(visual_idx, &block.clean_command, is_focused, is_pinned, max_width)
+            format_list_item(
+                visual_idx,
+                &block.clean_command,
+                is_focused,
+                is_pinned,
+                max_width,
+            )
         })
         .collect();
 
@@ -195,7 +201,12 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
 }
 
 /// Format a JSON list item
-fn format_json_list_item(index: usize, name: &str, is_focused: bool, max_width: usize) -> ListItem<'static> {
+fn format_json_list_item(
+    index: usize,
+    name: &str,
+    is_focused: bool,
+    max_width: usize,
+) -> ListItem<'static> {
     // Truncate long names to fit available width
     let display = if name.len() > max_width {
         format!("{}…", &name[..max_width.saturating_sub(1)])
@@ -299,8 +310,8 @@ fn format_path_list_item(
 ) -> ListItem<'static> {
     // Type indicator (nerdfonts)
     let type_icon = match block.kind {
-        PathType::Url => "\u{f0ac} ",   // nf-fa-globe
-        PathType::File => "\u{f4a5} ",  // nf-oct-file
+        PathType::Url => "\u{f0ac} ",  // nf-fa-globe
+        PathType::File => "\u{f4a5} ", // nf-oct-file
     };
 
     // Truncate long paths to fit available width
@@ -678,7 +689,13 @@ fn render_json_value(
             ]));
 
             for (i, item) in arr.iter().enumerate() {
-                render_json_item(item, indent_level + 1, indent_size, i < arr.len() - 1, lines);
+                render_json_item(
+                    item,
+                    indent_level + 1,
+                    indent_size,
+                    i < arr.len() - 1,
+                    lines,
+                );
             }
 
             lines.push(Line::from(vec![
@@ -729,7 +746,8 @@ fn render_json_item(
         && let Some(last) = lines.get_mut(start_idx..)
         && let Some(line) = last.last_mut()
     {
-        line.spans.push(Span::styled(",", json_style::punctuation()));
+        line.spans
+            .push(Span::styled(",", json_style::punctuation()));
     }
 }
 
@@ -760,7 +778,10 @@ fn render_json_key_value(
                 Value::Number(n) => spans.push(Span::styled(n.to_string(), json_style::number())),
                 Value::String(s) => {
                     let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
-                    spans.push(Span::styled(format!("\"{}\"", escaped), json_style::string()));
+                    spans.push(Span::styled(
+                        format!("\"{}\"", escaped),
+                        json_style::string(),
+                    ));
                 }
                 _ => unreachable!(),
             }
@@ -797,14 +818,17 @@ fn render_json_key_value(
 
             // Array contents
             for (i, item) in arr.iter().enumerate() {
-                render_json_item(item, indent_level + 1, indent_size, i < arr.len() - 1, lines);
+                render_json_item(
+                    item,
+                    indent_level + 1,
+                    indent_size,
+                    i < arr.len() - 1,
+                    lines,
+                );
             }
 
             // Closing bracket
-            let mut closing = vec![
-                Span::raw(indent),
-                Span::styled("]", json_style::bracket()),
-            ];
+            let mut closing = vec![Span::raw(indent), Span::styled("]", json_style::bracket())];
             if trailing_comma {
                 closing.push(Span::styled(",", json_style::punctuation()));
             }
@@ -840,10 +864,7 @@ fn render_json_key_value(
             }
 
             // Closing brace
-            let mut closing = vec![
-                Span::raw(indent),
-                Span::styled("}", json_style::bracket()),
-            ];
+            let mut closing = vec![Span::raw(indent), Span::styled("}", json_style::bracket())];
             if trailing_comma {
                 closing.push(Span::styled(",", json_style::punctuation()));
             }
