@@ -73,12 +73,51 @@ fn run_app(
         terminal.draw(|f| ui::render(f, app))?;
 
         if let Event::Key(key) = event::read()? {
+            // Handle search mode separately
+            if app.is_searching {
+                match key.code {
+                    KeyCode::Enter => {
+                        // Exit search mode, keep current selection
+                        app.is_searching = false;
+                    }
+                    KeyCode::Esc => {
+                        // Cancel search, restore full list
+                        app.clear_search();
+                    }
+                    KeyCode::Backspace => {
+                        app.on_search_backspace();
+                    }
+                    // Allow navigation while searching
+                    KeyCode::Up => app.previous(),
+                    KeyCode::Down => app.next(),
+                    // Ctrl+n/p must come before generic Char(c)
+                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.next();
+                    }
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.previous();
+                    }
+                    KeyCode::Char(c) => {
+                        app.on_search_input(c);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            // Normal mode
             match key.code {
                 // Quit
                 KeyCode::Char('q') => return Ok(()),
                 KeyCode::Esc => return Ok(()),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(());
+                }
+
+                // Enter search mode
+                KeyCode::Char('/') => {
+                    app.is_searching = true;
+                    app.search_query.clear();
                 }
 
                 // Navigation

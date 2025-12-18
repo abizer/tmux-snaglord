@@ -1,5 +1,7 @@
 //! Application state management
 
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 
 use crate::parser::CommandBlock;
@@ -12,6 +14,12 @@ pub struct App {
     pub list_state: ListState,
     /// Vertical scroll offset for the output pane
     pub scroll_offset: u16,
+    /// Current search query
+    pub search_query: String,
+    /// Whether we're in search mode
+    pub is_searching: bool,
+    /// Indices of blocks that match the current filter
+    pub filtered_indices: Vec<usize>,
 }
 
 impl App {
@@ -23,22 +31,35 @@ impl App {
             list_state.select(Some(0));
         }
 
+        // Initialize with all indices
+        let filtered_indices = (0..blocks.len()).collect();
+
         Self {
             blocks,
             list_state,
             scroll_offset: 0,
+            search_query: String::new(),
+            is_searching: false,
+            filtered_indices,
         }
+    }
+
+    /// Get the actual data index from the visual list selection
+    fn get_current_data_index(&self) -> Option<usize> {
+        self.list_state
+            .selected()
+            .and_then(|i| self.filtered_indices.get(i).copied())
     }
 
     /// Move selection to the next item
     pub fn next(&mut self) {
-        if self.blocks.is_empty() {
+        if self.filtered_indices.is_empty() {
             return;
         }
 
         let i = match self.list_state.selected() {
             Some(i) => {
-                if i >= self.blocks.len() - 1 {
+                if i >= self.filtered_indices.len() - 1 {
                     0 // Wrap to beginning
                 } else {
                     i + 1
@@ -52,14 +73,14 @@ impl App {
 
     /// Move selection to the previous item
     pub fn previous(&mut self) {
-        if self.blocks.is_empty() {
+        if self.filtered_indices.is_empty() {
             return;
         }
 
         let i = match self.list_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.blocks.len() - 1 // Wrap to end
+                    self.filtered_indices.len() - 1 // Wrap to end
                 } else {
                     i - 1
                 }
@@ -80,34 +101,88 @@ impl App {
         self.scroll_offset = self.scroll_offset.saturating_sub(1);
     }
 
+    /// Handle character input during search
+    pub fn on_search_input(&mut self, c: char) {
+        self.search_query.push(c);
+        self.update_search_results();
+    }
+
+    /// Handle backspace during search
+    pub fn on_search_backspace(&mut self) {
+        self.search_query.pop();
+        self.update_search_results();
+    }
+
+    /// Update filtered results based on current search query
+    pub fn update_search_results(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_indices = (0..self.blocks.len()).collect();
+        } else {
+            let matcher = SkimMatcherV2::default();
+            let mut matches: Vec<(i64, usize)> = self
+                .blocks
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, block)| {
+                    // Match against clean command and output
+                    let cmd_score = matcher.fuzzy_match(&block.clean_command, &self.search_query);
+                    let out_score = matcher.fuzzy_match(&block.output, &self.search_query);
+                    // Take best score from either
+                    match (cmd_score, out_score) {
+                        (Some(c), Some(o)) => Some((c.max(o), idx)),
+                        (Some(c), None) => Some((c, idx)),
+                        (None, Some(o)) => Some((o, idx)),
+                        (None, None) => None,
+                    }
+                })
+                .collect();
+
+            // Sort by score descending
+            matches.sort_by(|a, b| b.0.cmp(&a.0));
+
+            self.filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
+        }
+
+        // Reset selection to top of results
+        if !self.filtered_indices.is_empty() {
+            self.list_state.select(Some(0));
+        } else {
+            self.list_state.select(None);
+        }
+        self.scroll_offset = 0;
+    }
+
+    /// Clear search and restore full list
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.is_searching = false;
+        self.update_search_results();
+    }
+
     /// Get the output of the currently selected block (ANSI stripped for copying)
     pub fn get_selected_output(&self) -> Option<String> {
-        self.list_state
-            .selected()
+        self.get_current_data_index()
             .and_then(|i| self.blocks.get(i))
             .map(|b| strip_ansi(&b.output))
     }
 
     /// Get the command text only (prompt removed) for copying
     pub fn get_selected_command(&self) -> Option<String> {
-        self.list_state
-            .selected()
+        self.get_current_data_index()
             .and_then(|i| self.blocks.get(i))
             .map(|b| b.command_text.clone())
     }
 
     /// Get the full content (command + output) of the currently selected block (ANSI stripped)
     pub fn get_selected_full(&self) -> Option<String> {
-        self.list_state
-            .selected()
+        self.get_current_data_index()
             .and_then(|i| self.blocks.get(i))
             .map(|b| format!("{}\n{}", strip_ansi(&b.command), strip_ansi(&b.output)))
     }
 
     /// Get debug-formatted output for diagnosing parsing issues
     pub fn get_selected_debug(&self) -> Option<String> {
-        self.list_state
-            .selected()
+        self.get_current_data_index()
             .and_then(|i| self.blocks.get(i))
             .map(|b| {
                 let mut out = String::new();
@@ -129,6 +204,12 @@ impl App {
                 }
                 out
             })
+    }
+
+    /// Get the currently selected block for display
+    pub fn get_selected_block(&self) -> Option<&CommandBlock> {
+        self.get_current_data_index()
+            .and_then(|i| self.blocks.get(i))
     }
 }
 

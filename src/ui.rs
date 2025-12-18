@@ -27,7 +27,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     render_command_list(frame, app, chunks[0]);
     render_output_pane(frame, app, chunks[1]);
-    render_footer(frame, vertical[1]);
+    render_footer(frame, app, vertical[1]);
 }
 
 /// Render the command list in the left pane
@@ -35,10 +35,11 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     let selected_idx = app.list_state.selected();
 
     let items: Vec<ListItem> = app
-        .blocks
+        .filtered_indices
         .iter()
         .enumerate()
-        .map(|(i, block)| {
+        .map(|(visual_idx, &real_idx)| {
+            let block = &app.blocks[real_idx];
             // Use pre-computed clean command (ANSI stripped at parse time)
             let clean_cmd = &block.clean_command;
 
@@ -50,7 +51,7 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
             };
 
             // Style: dim line numbers, white commands
-            let is_selected = selected_idx == Some(i);
+            let is_selected = selected_idx == Some(visual_idx);
             let num_style = if is_selected {
                 Style::default().fg(Color::Green)
             } else {
@@ -59,14 +60,16 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
             let cmd_style = Style::default().fg(Color::White);
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:3} ", i + 1), num_style),
+                Span::styled(format!("{:3} ", visual_idx + 1), num_style),
                 Span::styled(display, cmd_style),
             ]))
         })
         .collect();
 
     let title = if let Some(idx) = selected_idx {
-        format!(" Commands ({}/{}) ", idx + 1, app.blocks.len())
+        format!(" Commands ({}/{}) ", idx + 1, app.filtered_indices.len())
+    } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
+        " No matches ".to_string()
     } else {
         " Commands ".to_string()
     };
@@ -93,16 +96,14 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
 fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Convert ANSI escape codes to ratatui styled Text
     // Show command + output together
-    let content = if let Some(idx) = app.list_state.selected() {
-        if let Some(block) = app.blocks.get(idx) {
-            let full = format!("{}\n{}", block.command, block.output);
-            let bytes = full.into_bytes();
-            bytes
-                .into_text()
-                .unwrap_or_else(|_| "Error rendering".into())
-        } else {
-            "No selection".into()
-        }
+    let content = if let Some(block) = app.get_selected_block() {
+        let full = format!("{}\n{}", block.command, block.output);
+        let bytes = full.into_bytes();
+        bytes
+            .into_text()
+            .unwrap_or_else(|_| "Error rendering".into())
+    } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
+        "No matching commands".into()
     } else {
         "Select a command with j/k...".into()
     };
@@ -112,15 +113,44 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
     frame.render_widget(paragraph, area);
 }
 
-/// Render the help footer
-fn render_footer(frame: &mut Frame, area: ratatui::layout::Rect) {
+/// Render the footer (help or search bar)
+fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    if app.is_searching {
+        render_search_bar(frame, app, area);
+    } else {
+        render_help_bar(frame, area);
+    }
+}
+
+/// Render the search bar
+fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let search_text = Line::from(vec![
+        Span::styled(" / ", Style::default().fg(Color::Yellow)),
+        Span::styled(&app.search_query, Style::default().fg(Color::White)),
+        Span::styled("▏", Style::default().fg(Color::Yellow)), // Cursor
+    ]);
+
+    let paragraph = Paragraph::new(search_text).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(paragraph, area);
+}
+
+/// Render the help bar
+fn render_help_bar(frame: &mut Frame, area: ratatui::layout::Rect) {
     let key_style = Style::default().fg(Color::Green);
     let desc_style = Style::default().fg(Color::White);
     let sep_style = Style::default().fg(Color::DarkGray);
 
     let help = Line::from(vec![
-        Span::styled(" j/k ", key_style),
-        Span::styled("navigate", desc_style),
+        Span::styled(" / ", key_style),
+        Span::styled("search", desc_style),
+        Span::styled("  ·  ", sep_style),
+        Span::styled("j/k ", key_style),
+        Span::styled("nav", desc_style),
         Span::styled("  ·  ", sep_style),
         Span::styled("y ", key_style),
         Span::styled("output", desc_style),
