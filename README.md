@@ -95,8 +95,8 @@ Options:
   -m, --mode <MODE>       Start in specific view mode [possible values: commands, json, paths]
 ```
 
-The special target `previous` captures the last active pane, useful when you want
-to run the tool from a different pane than the one you're inspecting.
+The special target `previous` captures the last active pane, useful when you
+want to run the tool from a different pane than the one you're inspecting.
 
 ### Key bindings
 
@@ -129,9 +129,9 @@ to run the tool from a different pane than the one you're inspecting.
 
 **Pane navigation**
 
-| Key | Action                                        |
-| --- | --------------------------------------------- |
-| `;` | Toggle between original and previous pane     |
+| Key | Action                                    |
+| --- | ----------------------------------------- |
+| `;` | Toggle between original and previous pane |
 
 Use `;` to switch between viewing history from different panes without
 restarting. Paste actions (`p`/`P`) always target the original pane where the
@@ -202,6 +202,19 @@ Bind to a key in `~/.tmux.conf`:
 # Open in a popup (tmux 3.2+)
 bind-key C-y popup -E -w 60% -h 60% "tmux-snaglord"
 ```
+
+### Feeding output to CLI-based LLM agents
+
+When working with Claude Code or similar CLI-based LLM agents, you often need to
+share command output from another pane:
+
+1. Run commands in your working pane
+2. Switch to the pane where Claude Code is running
+3. Open tmux-snaglord and press `;` to load history from your previous pane
+4. Select the output you need and press `p` to paste it directly into the
+   conversation
+
+This avoids manual copying and keeps your hands on the keyboard.
 
 ## Related projects
 
