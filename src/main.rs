@@ -90,12 +90,23 @@ fn run_app(
                     // Allow navigation while searching
                     KeyCode::Up => app.previous(),
                     KeyCode::Down => app.next(),
-                    // Ctrl+n/p must come before generic Char(c)
+                    // Ctrl+n/p for navigation
                     KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.next();
                     }
                     KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.previous();
+                    }
+                    // Allow scrolling output while searching
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        for _ in 0..10 {
+                            app.scroll_down();
+                        }
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        for _ in 0..10 {
+                            app.scroll_up();
+                        }
                     }
                     KeyCode::Char(c) => {
                         app.on_search_input(c);
@@ -107,9 +118,16 @@ fn run_app(
 
             // Normal mode
             match key.code {
-                // Quit
+                // Quit (or clear search filter first)
                 KeyCode::Char('q') => return Ok(()),
-                KeyCode::Esc => return Ok(()),
+                KeyCode::Esc => {
+                    // If we have an active filter, clear it first; otherwise quit
+                    if !app.search_query.is_empty() {
+                        app.clear_search();
+                    } else {
+                        return Ok(());
+                    }
+                }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(());
                 }

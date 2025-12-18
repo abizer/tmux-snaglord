@@ -124,9 +124,10 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, block)| {
-                    // Match against clean command and output
+                    // Match against clean command and ANSI-stripped output
                     let cmd_score = matcher.fuzzy_match(&block.clean_command, &self.search_query);
-                    let out_score = matcher.fuzzy_match(&block.output, &self.search_query);
+                    let clean_output = strip_ansi(&block.output);
+                    let out_score = matcher.fuzzy_match(&clean_output, &self.search_query);
                     // Take best score from either
                     match (cmd_score, out_score) {
                         (Some(c), Some(o)) => Some((c.max(o), idx)),
@@ -137,8 +138,8 @@ impl App {
                 })
                 .collect();
 
-            // Sort by score descending
-            matches.sort_by(|a, b| b.0.cmp(&a.0));
+            // Sort by score descending, use index as tie-breaker to preserve order
+            matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
             self.filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
         }
