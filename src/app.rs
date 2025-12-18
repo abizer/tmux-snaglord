@@ -6,15 +6,16 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 
 use crate::action::Action;
-use crate::parser::{find_json_candidates, CommandBlock, JsonBlock};
+use crate::parser::{find_json_candidates, find_path_candidates, CommandBlock, JsonBlock, PathBlock};
 use crate::tmux;
 use crate::utils::{escape_debug, strip_ansi};
 
-/// Application mode (Commands view or JSON view)
+/// Application mode (Commands, JSON, or Paths view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Commands,
     Json,
+    Paths,
 }
 
 /// Result of processing an action
@@ -48,6 +49,14 @@ pub struct App {
     /// Indices of JSON blocks that match the current filter
     pub json_filtered_indices: Vec<usize>,
 
+    // Paths state
+    /// Parsed path/URL blocks
+    pub path_blocks: Vec<PathBlock>,
+    /// State for the paths list widget
+    pub path_list_state: ListState,
+    /// Indices of path blocks that match the current filter
+    pub path_filtered_indices: Vec<usize>,
+
     // Shared state
     /// Vertical scroll offset for the output pane
     pub scroll_offset: u16,
@@ -74,6 +83,14 @@ impl App {
         }
         let json_filtered_indices = (0..json_blocks.len()).collect();
 
+        // Parse paths/URLs from command outputs
+        let path_blocks = find_path_candidates(&blocks);
+        let mut path_list_state = ListState::default();
+        if !path_blocks.is_empty() {
+            path_list_state.select(Some(0));
+        }
+        let path_filtered_indices = (0..path_blocks.len()).collect();
+
         Self {
             mode: Mode::Commands,
             blocks,
@@ -83,6 +100,9 @@ impl App {
             json_blocks,
             json_list_state,
             json_filtered_indices,
+            path_blocks,
+            path_list_state,
+            path_filtered_indices,
             scroll_offset: 0,
             search_query: String::new(),
             is_searching: false,
@@ -137,6 +157,13 @@ impl App {
                             return Ok(UpdateResult::Quit);
                         }
                     }
+                    Mode::Paths => {
+                        // In Paths mode, y copies the raw match (path with line:col if present)
+                        if let Some(block) = self.get_selected_path_block() {
+                            tmux::copy_to_clipboard(&block.raw)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
                 }
             }
             Action::CopyFull => {
@@ -151,6 +178,13 @@ impl App {
                         // In JSON mode, Y copies the pretty-printed JSON
                         if let Some(block) = self.get_selected_json_block() {
                             tmux::copy_to_clipboard(&block.pretty)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
+                    Mode::Paths => {
+                        // In Paths mode, Y copies just the path (without line:col)
+                        if let Some(block) = self.get_selected_path_block() {
+                            tmux::copy_to_clipboard(&block.path)?;
                             return Ok(UpdateResult::Quit);
                         }
                     }
@@ -202,12 +236,28 @@ impl App {
                             return Ok(UpdateResult::Quit);
                         }
                     }
+                    Mode::Paths => {
+                        // Submit copies the raw match (same as y)
+                        if let Some(block) = self.get_selected_path_block() {
+                            tmux::copy_to_clipboard(&block.raw)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
                 }
             }
             Action::SwitchMode => {
                 self.mode = match self.mode {
                     Mode::Commands => Mode::Json,
+                    Mode::Json => Mode::Paths,
+                    Mode::Paths => Mode::Commands,
+                };
+                self.scroll_offset = 0;
+            }
+            Action::SwitchModePrev => {
+                self.mode = match self.mode {
+                    Mode::Commands => Mode::Paths,
                     Mode::Json => Mode::Commands,
+                    Mode::Paths => Mode::Json,
                 };
                 self.scroll_offset = 0;
             }
@@ -268,6 +318,22 @@ impl App {
                 };
                 self.json_list_state.select(Some(i));
             }
+            Mode::Paths => {
+                if self.path_filtered_indices.is_empty() {
+                    return;
+                }
+                let i = match self.path_list_state.selected() {
+                    Some(i) => {
+                        if i >= self.path_filtered_indices.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.path_list_state.select(Some(i));
+            }
         }
         self.scroll_offset = 0;
     }
@@ -306,6 +372,22 @@ impl App {
                     None => 0,
                 };
                 self.json_list_state.select(Some(i));
+            }
+            Mode::Paths => {
+                if self.path_filtered_indices.is_empty() {
+                    return;
+                }
+                let i = match self.path_list_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.path_filtered_indices.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.path_list_state.select(Some(i));
             }
         }
         self.scroll_offset = 0;
@@ -389,6 +471,38 @@ impl App {
                     self.json_list_state.select(Some(0));
                 } else {
                     self.json_list_state.select(None);
+                }
+            }
+            Mode::Paths => {
+                if self.search_query.is_empty() {
+                    self.path_filtered_indices = (0..self.path_blocks.len()).collect();
+                } else {
+                    let matcher = SkimMatcherV2::default();
+                    let mut matches: Vec<(i64, usize)> = self
+                        .path_blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            // Search in path and raw string
+                            let path_score = matcher.fuzzy_match(&block.path, &self.search_query);
+                            let raw_score = matcher.fuzzy_match(&block.raw, &self.search_query);
+                            match (path_score, raw_score) {
+                                (Some(p), Some(r)) => Some((p.max(r), idx)),
+                                (Some(p), None) => Some((p, idx)),
+                                (None, Some(r)) => Some((r, idx)),
+                                (None, None) => None,
+                            }
+                        })
+                        .collect();
+
+                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                    self.path_filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                }
+
+                if !self.path_filtered_indices.is_empty() {
+                    self.path_list_state.select(Some(0));
+                } else {
+                    self.path_list_state.select(None);
                 }
             }
         }
@@ -482,5 +596,13 @@ impl App {
             .selected()
             .and_then(|i| self.json_filtered_indices.get(i).copied())
             .and_then(|real_idx| self.json_blocks.get(real_idx))
+    }
+
+    /// Get the currently selected path block for display
+    pub fn get_selected_path_block(&self) -> Option<&PathBlock> {
+        self.path_list_state
+            .selected()
+            .and_then(|i| self.path_filtered_indices.get(i).copied())
+            .and_then(|real_idx| self.path_blocks.get(real_idx))
     }
 }

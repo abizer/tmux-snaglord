@@ -37,6 +37,8 @@ pub enum Action {
     ClearSelection,
     /// Submit/copy the current selection (or single item if none selected)
     Submit,
-    /// Switch between Commands and JSON modes
+    /// Switch to next mode
     SwitchMode,
+    /// Switch to previous mode
+    SwitchModePrev,
 }

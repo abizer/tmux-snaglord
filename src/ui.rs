@@ -11,6 +11,7 @@ use ratatui::{
 use serde_json::Value;
 
 use crate::app::{App, Mode};
+use crate::parser::PathType;
 
 /// Render the application UI
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -36,6 +37,7 @@ fn render_list_pane(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
     match app.mode {
         Mode::Commands => render_command_list(frame, app, area),
         Mode::Json => render_json_list(frame, app, area),
+        Mode::Paths => render_paths_list(frame, app, area),
     }
 }
 
@@ -64,7 +66,9 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" ", Style::default()),
-        Span::styled("JSON", Style::default().fg(Color::DarkGray)),
+        Span::styled("[JSON]", Style::default().fg(Color::DarkGray)),
+        Span::styled(" ", Style::default()),
+        Span::styled("[Paths]", Style::default().fg(Color::DarkGray)),
     ]);
 
     // Left title: shows selection count if items are pinned, otherwise "Commands (X/Y)"
@@ -132,7 +136,7 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
 
     // Build title with mode tabs
     let mode_tabs = Line::from(vec![
-        Span::styled("Commands", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Commands]", Style::default().fg(Color::DarkGray)),
         Span::styled(" ", Style::default()),
         Span::styled(
             "[JSON]",
@@ -140,6 +144,8 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::styled(" ", Style::default()),
+        Span::styled("[Paths]", Style::default().fg(Color::DarkGray)),
     ]);
 
     // Count info
@@ -207,6 +213,116 @@ fn format_json_list_item(index: usize, name: &str, is_focused: bool) -> ListItem
     ]))
 }
 
+/// Render the paths/URLs list in the left pane
+fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let selected_idx = app.path_list_state.selected();
+
+    let items: Vec<ListItem> = app
+        .path_filtered_indices
+        .iter()
+        .enumerate()
+        .map(|(visual_idx, &real_idx)| {
+            let block = &app.path_blocks[real_idx];
+            let is_focused = selected_idx == Some(visual_idx);
+            format_path_list_item(visual_idx, block, is_focused)
+        })
+        .collect();
+
+    // Build title with mode tabs
+    let mode_tabs = Line::from(vec![
+        Span::styled("[Commands]", Style::default().fg(Color::DarkGray)),
+        Span::styled(" ", Style::default()),
+        Span::styled("[JSON]", Style::default().fg(Color::DarkGray)),
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            "[Paths]",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    // Count info
+    let count_title = if let Some(idx) = selected_idx {
+        Line::from(vec![Span::styled(
+            format!(" ({}/{}) ", idx + 1, app.path_filtered_indices.len()),
+            Style::default().fg(Color::DarkGray),
+        )])
+    } else {
+        Line::from(vec![])
+    };
+
+    let mut block = Block::default()
+        .borders(Borders::RIGHT)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title_top(mode_tabs)
+        .title_top(count_title.alignment(Alignment::Right));
+
+    // Add search filter indicator
+    if !app.search_query.is_empty() {
+        let filter_title = Line::from(vec![Span::styled(
+            format!(
+                " \"{}\" ({} of {}) ",
+                app.search_query,
+                app.path_filtered_indices.len(),
+                app.path_blocks.len()
+            ),
+            Style::default().fg(Color::Yellow),
+        )]);
+        block = block.title_bottom(filter_title);
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .bg(Color::DarkGray),
+        )
+        .highlight_symbol("▶ ");
+
+    frame.render_stateful_widget(list, area, &mut app.path_list_state);
+}
+
+/// Format a path list item with type indicator
+fn format_path_list_item(
+    index: usize,
+    block: &crate::parser::PathBlock,
+    is_focused: bool,
+) -> ListItem<'static> {
+    // Type indicator (nerdfonts)
+    let type_icon = match block.kind {
+        PathType::Url => "\u{f0ac} ",   // nf-fa-globe
+        PathType::File => "\u{f4a5} ",  // nf-oct-file
+    };
+
+    // Truncate long paths
+    let display = if block.raw.len() > 34 {
+        format!("{}…", &block.raw[..33])
+    } else {
+        block.raw.clone()
+    };
+
+    let num_style = if is_focused {
+        Style::default().fg(Color::Magenta)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let icon_style = match block.kind {
+        PathType::Url => Style::default().fg(Color::Cyan),
+        PathType::File => Style::default().fg(Color::Yellow),
+    };
+
+    let path_style = Style::default().fg(Color::White);
+
+    ListItem::new(Line::from(vec![
+        Span::styled(format!("{:3} ", index + 1), num_style),
+        Span::styled(type_icon, icon_style),
+        Span::styled(display, path_style),
+    ]))
+}
+
 /// Render the output pane on the right
 fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let content = match app.mode {
@@ -234,6 +350,17 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
                 "No matching JSON objects".into()
             } else {
                 "Select a JSON object with j/k...".into()
+            }
+        }
+        Mode::Paths => {
+            if let Some(block) = app.get_selected_path_block() {
+                path_to_text(block)
+            } else if app.path_blocks.is_empty() {
+                "No paths or URLs found in history.".into()
+            } else if app.path_filtered_indices.is_empty() && !app.search_query.is_empty() {
+                "No matching paths".into()
+            } else {
+                "Select a path with j/k...".into()
             }
         }
     };
@@ -320,6 +447,25 @@ fn render_help_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Span::styled("q ", key_style),
             Span::styled("quit", desc_style),
         ]),
+        Mode::Paths => Line::from(vec![
+            Span::styled("TAB ", key_style),
+            Span::styled("mode", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("/ ", key_style),
+            Span::styled("search", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("j/k ", key_style),
+            Span::styled("nav", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("y ", key_style),
+            Span::styled("full", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("Y ", key_style),
+            Span::styled("path", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("q ", key_style),
+            Span::styled("quit", desc_style),
+        ]),
     };
 
     let paragraph = Paragraph::new(help).block(
@@ -364,6 +510,77 @@ fn format_list_item(
         Span::styled(marker, Style::default().fg(Color::Yellow)),
         Span::styled(display, cmd_style),
     ]))
+}
+
+// === Path Display ===
+
+/// Convert a PathBlock to styled Text for preview pane
+fn path_to_text(block: &crate::parser::PathBlock) -> Text<'static> {
+    let mut lines = Vec::new();
+
+    // Type label
+    let type_label = match block.kind {
+        PathType::Url => ("URL", Color::Cyan),
+        PathType::File => ("File", Color::Yellow),
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled("Type: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(type_label.0, Style::default().fg(type_label.1)),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Full path/URL
+    lines.push(Line::from(vec![
+        Span::styled("Full: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(block.raw.clone(), Style::default().fg(Color::White)),
+    ]));
+
+    // If path has line/col info, show separately
+    if block.line.is_some() || block.col.is_some() {
+        lines.push(Line::from(""));
+
+        lines.push(Line::from(vec![
+            Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(block.path.clone(), Style::default().fg(Color::Green)),
+        ]));
+
+        if let Some(line) = block.line {
+            lines.push(Line::from(vec![
+                Span::styled("Line: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(line.to_string(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+
+        if let Some(col) = block.col {
+            lines.push(Line::from(vec![
+                Span::styled("Col:  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(col.to_string(), Style::default().fg(Color::Yellow)),
+            ]));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Copy hints
+    lines.push(Line::from(vec![Span::styled(
+        "Copy options:",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![
+        Span::styled("  y ", Style::default().fg(Color::Magenta)),
+        Span::styled("full path with line:col", Style::default().fg(Color::White)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Y ", Style::default().fg(Color::Magenta)),
+        Span::styled("path only (no line:col)", Style::default().fg(Color::White)),
+    ]));
+
+    Text::from(lines)
 }
 
 // === JSON Syntax Highlighting ===

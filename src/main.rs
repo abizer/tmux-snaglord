@@ -106,8 +106,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 /// Map a key event to an action based on current application state
 fn get_action(key: KeyEvent, app: &App) -> Option<Action> {
     // Tab switches modes (available in both search and normal mode)
-    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+    if key.code == KeyCode::Tab {
         return Some(Action::SwitchMode);
+    }
+    if key.code == KeyCode::BackTab {
+        return Some(Action::SwitchModePrev);
     }
 
     // Search mode key mappings

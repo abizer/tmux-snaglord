@@ -33,6 +33,28 @@ pub struct JsonBlock {
     pub value: Value,
 }
 
+/// Type of path/URL detected
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathType {
+    Url,
+    File,
+}
+
+/// A block representing a detected file path or URL
+#[derive(Debug, Clone)]
+pub struct PathBlock {
+    /// The original match text (e.g., "src/main.rs:10:5")
+    pub raw: String,
+    /// Just the path/url part (e.g., "src/main.rs")
+    pub path: String,
+    /// Line number if detected
+    pub line: Option<usize>,
+    /// Column number if detected
+    pub col: Option<usize>,
+    /// Type for icon/categorization
+    pub kind: PathType,
+}
+
 /// Tracks shell syntax state for detecting incomplete commands
 #[derive(Default)]
 struct CommandState {
@@ -391,6 +413,130 @@ pub fn find_json_candidates(blocks: &[CommandBlock]) -> Vec<JsonBlock> {
     }
 
     json_blocks
+}
+
+/// Scan command blocks for file paths and URLs
+pub fn find_path_candidates(blocks: &[CommandBlock]) -> Vec<PathBlock> {
+    use std::collections::HashSet;
+
+    // URL pattern: http, https, ftp, file, git, ssh protocols
+    let url_re =
+        Regex::new(r#"(?:https?|ftp|file|git|ssh)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"#)
+            .unwrap();
+
+    // Git SSH pattern: user@host:path
+    let git_ssh_re = Regex::new(r#"[a-zA-Z0-9_.-]+@[a-zA-Z0-9.-]+:[a-zA-Z0-9_./-]+"#).unwrap();
+
+    // File path pattern with optional :line:col
+    // Matches:
+    // - Absolute paths: /foo/bar.rs
+    // - Home paths: ~/foo/bar.rs
+    // - Relative paths: ./foo, ../bar, foo/bar.rs
+    // - Multi-level: src/utils/parser.rs
+    // - With line/col: path:10:5
+    let path_re = Regex::new(
+        r#"(?x)
+        (
+            (?:
+                # Anchored paths: /, ~/, ./, ../
+                (?:[/~]|\.\.?/)
+                [\w./-]+
+            )
+            |
+            (?:
+                # Loose paths: one or more dir segments + file with extension
+                # e.g. src/main.rs, foo/bar/baz.js
+                (?:[\w.-]+/)+
+                [\w.-]+\.\w+
+            )
+        )
+        (?:
+            :(\d+)          # Line number
+            (?::(\d+))?     # Column number
+        )?
+    "#,
+    )
+    .unwrap();
+
+    let mut path_blocks = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for block in blocks {
+        // Strip ANSI codes from output
+        let clean_bytes = strip_ansi_escapes::strip(&block.output);
+        let text = String::from_utf8_lossy(&clean_bytes);
+
+        // Also scan the command itself (paths often appear in commands)
+        let sources = [text.as_ref(), block.clean_command.as_str()];
+
+        for source in sources {
+            // Find URLs
+            for cap in url_re.find_iter(source) {
+                let match_str = cap.as_str().to_string();
+                if seen.contains(&match_str) {
+                    continue;
+                }
+
+                seen.insert(match_str.clone());
+                path_blocks.push(PathBlock {
+                    raw: match_str.clone(),
+                    path: match_str,
+                    line: None,
+                    col: None,
+                    kind: PathType::Url,
+                });
+            }
+
+            // Find git SSH URLs
+            for cap in git_ssh_re.find_iter(source) {
+                let match_str = cap.as_str().to_string();
+                if seen.contains(&match_str) {
+                    continue;
+                }
+
+                seen.insert(match_str.clone());
+                path_blocks.push(PathBlock {
+                    raw: match_str.clone(),
+                    path: match_str,
+                    line: None,
+                    col: None,
+                    kind: PathType::Url,
+                });
+            }
+
+            // Find file paths
+            for cap in path_re.captures_iter(source) {
+                let raw = cap.get(0).unwrap().as_str().to_string();
+                if seen.contains(&raw) {
+                    continue;
+                }
+
+                let path_part = cap.get(1).unwrap().as_str().to_string();
+
+                // Skip common false positives
+                if path_part.contains("...")
+                    || path_part.ends_with('.')
+                    || path_part.ends_with('/')
+                {
+                    continue;
+                }
+
+                let line = cap.get(2).and_then(|m| m.as_str().parse().ok());
+                let col = cap.get(3).and_then(|m| m.as_str().parse().ok());
+
+                seen.insert(raw.clone());
+                path_blocks.push(PathBlock {
+                    raw,
+                    path: path_part,
+                    line,
+                    col,
+                    kind: PathType::File,
+                });
+            }
+        }
+    }
+
+    path_blocks
 }
 
 #[cfg(test)]
