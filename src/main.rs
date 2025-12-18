@@ -236,8 +236,8 @@ fn get_action(key: KeyEvent, app: &App) -> Option<Action> {
         KeyCode::Char('2') => Some(Action::SwitchToJson),
         KeyCode::Char('3') => Some(Action::SwitchToPaths),
 
-        // Load previous pane's scrollback
-        KeyCode::Char('P') => Some(Action::LoadPreviousPane),
+        // Load previous pane's scrollback (matches tmux's prefix-; for last pane)
+        KeyCode::Char(';') => Some(Action::LoadPreviousPane),
 
         KeyCode::Esc => {
             if !app.search_query.is_empty() {
