@@ -34,6 +34,8 @@ pub enum UpdateResult {
 pub struct App {
     /// Current view mode
     pub mode: Mode,
+    /// Use Nerd Fonts/Powerline glyphs
+    pub nerd_fonts: bool,
 
     // Command state
     /// Parsed command blocks
@@ -72,7 +74,7 @@ pub struct App {
 
 impl App {
     /// Create a new App with the given command blocks
-    pub fn new(blocks: Vec<CommandBlock>) -> Self {
+    pub fn new(blocks: Vec<CommandBlock>, nerd_fonts: bool) -> Self {
         let mut list_state = ListState::default();
         if !blocks.is_empty() {
             list_state.select(Some(0));
@@ -97,6 +99,7 @@ impl App {
 
         Self {
             mode: Mode::Commands,
+            nerd_fonts,
             blocks,
             list_state,
             filtered_indices,

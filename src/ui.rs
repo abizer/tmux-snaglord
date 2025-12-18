@@ -17,8 +17,8 @@ use crate::parser::PathType;
 const PL_LEFT_CAP: &str = "\u{e0b6}"; //
 const PL_RIGHT_CAP: &str = "\u{e0b4}"; //
 
-/// Build powerline-style mode tabs capsules
-fn build_mode_tabs(active_mode: Mode) -> Line<'static> {
+/// Build mode tabs (powerline capsules or plain brackets based on nerd_fonts setting)
+fn build_mode_tabs(active_mode: Mode, use_nerd_fonts: bool) -> Line<'static> {
     let tabs = [
         ("Commands", Color::Green, Mode::Commands),
         ("JSON", Color::Blue, Mode::Json),
@@ -36,19 +36,28 @@ fn build_mode_tabs(active_mode: Mode) -> Line<'static> {
         }
 
         if is_active {
-            // Active tab: colored caps + inverted text (black on colored bg)
-            spans.push(Span::styled(PL_LEFT_CAP, Style::default().fg(*color)));
-            spans.push(Span::styled(
-                *label,
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(*color)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(PL_RIGHT_CAP, Style::default().fg(*color)));
+            if use_nerd_fonts {
+                // Powerline style: colored caps + inverted text
+                spans.push(Span::styled(PL_LEFT_CAP, Style::default().fg(*color)));
+                spans.push(Span::styled(
+                    *label,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(*color)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(PL_RIGHT_CAP, Style::default().fg(*color)));
+            } else {
+                // Plain ASCII: [Label]
+                spans.push(Span::styled("[", Style::default().fg(*color)));
+                spans.push(Span::styled(
+                    *label,
+                    Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("]", Style::default().fg(*color)));
+            }
         } else {
-            // Inactive tab: gray text, no caps but spaced to align
-            // Add phantom spacing to match cap widths
+            // Inactive tab: gray text with spacing to align
             spans.push(Span::raw(" "));
             spans.push(Span::styled(*label, Style::default().fg(Color::DarkGray)));
             spans.push(Span::raw(" "));
@@ -111,7 +120,7 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         .collect();
 
     // Build title with mode tabs and count info
-    let mode_tabs = build_mode_tabs(Mode::Commands);
+    let mode_tabs = build_mode_tabs(Mode::Commands, app.nerd_fonts);
 
     // Left title: shows selection count if items are pinned, otherwise "Commands (X/Y)"
     let left_title = if !app.selection.is_empty() {
@@ -179,7 +188,7 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         .collect();
 
     // Build title with mode tabs
-    let mode_tabs = build_mode_tabs(Mode::Json);
+    let mode_tabs = build_mode_tabs(Mode::Json, app.nerd_fonts);
 
     // Count info
     let count_title = if let Some(idx) = selected_idx {
@@ -257,6 +266,7 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
     // Available width: area - border (1) - highlight symbol (2) - number (4) - icon (2)
     let max_width = area.width.saturating_sub(9) as usize;
 
+    let use_nerd_fonts = app.nerd_fonts;
     let items: Vec<ListItem> = app
         .path_filtered_indices
         .iter()
@@ -264,12 +274,12 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
         .map(|(visual_idx, &real_idx)| {
             let block = &app.path_blocks[real_idx];
             let is_focused = selected_idx == Some(visual_idx);
-            format_path_list_item(visual_idx, block, is_focused, max_width)
+            format_path_list_item(visual_idx, block, is_focused, max_width, use_nerd_fonts)
         })
         .collect();
 
     // Build title with mode tabs
-    let mode_tabs = build_mode_tabs(Mode::Paths);
+    let mode_tabs = build_mode_tabs(Mode::Paths, app.nerd_fonts);
 
     // Count info
     let count_title = if let Some(idx) = selected_idx {
@@ -319,11 +329,19 @@ fn format_path_list_item(
     block: &crate::parser::PathBlock,
     is_focused: bool,
     max_width: usize,
+    use_nerd_fonts: bool,
 ) -> ListItem<'static> {
-    // Type indicator (nerdfonts)
-    let type_icon = match block.kind {
-        PathType::Url => "\u{f0ac} ",  // nf-fa-globe
-        PathType::File => "\u{f4a5} ", // nf-oct-file
+    // Type indicator
+    let type_icon = if use_nerd_fonts {
+        match block.kind {
+            PathType::Url => "\u{f0ac} ",  // nf-fa-globe
+            PathType::File => "\u{f4a5} ", // nf-oct-file
+        }
+    } else {
+        match block.kind {
+            PathType::Url => "@ ",
+            PathType::File => "~ ",
+        }
     };
 
     // Truncate long paths to fit available width

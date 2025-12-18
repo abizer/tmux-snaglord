@@ -15,6 +15,9 @@ pub struct Config {
     /// Preset name to use
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
+    /// Use Nerd Font / Powerline glyphs (default: false)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nerd_fonts: Option<bool>,
 }
 
 impl Config {

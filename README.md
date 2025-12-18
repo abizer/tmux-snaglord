@@ -160,6 +160,9 @@ preset = "starship"
 
 # OR define a custom regex (takes precedence)
 # prompt = "^[/~].* % "
+
+# Enable Nerd Font icons and Powerline glyphs (default: false)
+# nerd_fonts = true
 ```
 
 ### Presets

@@ -103,6 +103,7 @@ fn run_init(target: Option<&str>) -> Result<()> {
             let config = config::Config {
                 preset: Some(preset.name.to_string()),
                 prompt: None,
+                nerd_fonts: None,
             };
 
             let path = config.save()?;
@@ -125,6 +126,9 @@ fn run_tui(args: RunArgs) -> Result<()> {
 
     // Resolve prompt pattern: CLI > Config > Default
     let prompt_pattern = resolve_prompt_pattern(&args, &config)?;
+
+    // Resolve nerd fonts preference: Config > Default (false)
+    let use_nerd_fonts = config.nerd_fonts.unwrap_or(false);
 
     // Validate regex early (before potentially slow tmux capture)
     let prompt_re = Regex::new(&prompt_pattern).context(format!(
@@ -153,7 +157,7 @@ fn run_tui(args: RunArgs) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run the app
-    let mut app = App::new(blocks);
+    let mut app = App::new(blocks, use_nerd_fonts);
 
     // Apply the requested mode if present
     if let Some(mode) = args.mode {
