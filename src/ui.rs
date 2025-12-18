@@ -21,8 +21,8 @@ const PL_RIGHT_CAP: &str = "\u{e0b4}"; //
 fn build_mode_tabs(active_mode: Mode, use_nerd_fonts: bool) -> Line<'static> {
     let tabs = [
         ("Commands", Color::Green, Mode::Commands),
-        ("JSON", Color::Blue, Mode::Json),
         ("Paths", Color::Magenta, Mode::Paths),
+        ("JSON", Color::Blue, Mode::Json),
     ];
 
     let mut spans = Vec::new();

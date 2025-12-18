@@ -254,18 +254,18 @@ impl App {
             }
             Action::SwitchMode => {
                 self.mode = match self.mode {
-                    Mode::Commands => Mode::Json,
-                    Mode::Json => Mode::Paths,
-                    Mode::Paths => Mode::Commands,
+                    Mode::Commands => Mode::Paths,
+                    Mode::Paths => Mode::Json,
+                    Mode::Json => Mode::Commands,
                 };
                 self.scroll_offset = 0;
                 self.update_search_results();
             }
             Action::SwitchModePrev => {
                 self.mode = match self.mode {
-                    Mode::Commands => Mode::Paths,
-                    Mode::Json => Mode::Commands,
-                    Mode::Paths => Mode::Json,
+                    Mode::Commands => Mode::Json,
+                    Mode::Json => Mode::Paths,
+                    Mode::Paths => Mode::Commands,
                 };
                 self.scroll_offset = 0;
                 self.update_search_results();
