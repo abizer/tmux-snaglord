@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -9,10 +9,15 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use regex::Regex;
 use std::io;
 
+mod action;
 mod app;
 mod parser;
 mod tmux;
 mod ui;
+mod utils;
+
+use action::Action;
+use app::{App, UpdateResult};
 
 #[derive(Parser)]
 #[command(name = "tmux-copy-tool")]
@@ -53,7 +58,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run the app
-    let mut app = app::App::new(blocks);
+    let mut app = App::new(blocks);
     let res = run_app(&mut terminal, &mut app);
 
     // Restore terminal
@@ -61,133 +66,89 @@ fn main() -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    // Handle any error from the app loop
     res
 }
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut app::App,
-) -> Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|f| ui::render(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            // Handle search mode separately
-            if app.is_searching {
-                match key.code {
-                    KeyCode::Enter => {
-                        // Exit search mode, keep current selection
-                        app.is_searching = false;
-                    }
-                    KeyCode::Esc => {
-                        // Cancel search, restore full list
-                        app.clear_search();
-                    }
-                    KeyCode::Backspace => {
-                        app.on_search_backspace();
-                    }
-                    // Allow navigation while searching
-                    KeyCode::Up => app.previous(),
-                    KeyCode::Down => app.next(),
-                    // Ctrl+n/p for navigation
-                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.next();
-                    }
-                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.previous();
-                    }
-                    // Allow scrolling output while searching
-                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        for _ in 0..10 {
-                            app.scroll_down();
-                        }
-                    }
-                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        for _ in 0..10 {
-                            app.scroll_up();
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        app.on_search_input(c);
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            // Normal mode
-            match key.code {
-                // Quit (or clear search filter first)
-                KeyCode::Char('q') => return Ok(()),
-                KeyCode::Esc => {
-                    // If we have an active filter, clear it first; otherwise quit
-                    if !app.search_query.is_empty() {
-                        app.clear_search();
-                    } else {
-                        return Ok(());
-                    }
-                }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(());
-                }
-
-                // Enter search mode
-                KeyCode::Char('/') => {
-                    app.is_searching = true;
-                    app.search_query.clear();
-                }
-
-                // Navigation
-                KeyCode::Char('j') | KeyCode::Down => app.next(),
-                KeyCode::Char('k') | KeyCode::Up => app.previous(),
-
-                // Scroll output pane
-                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    for _ in 0..10 {
-                        app.scroll_down();
-                    }
-                }
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    for _ in 0..10 {
-                        app.scroll_up();
-                    }
-                }
-
-                // Copy output only
-                KeyCode::Char('y') => {
-                    if let Some(output) = app.get_selected_output() {
-                        tmux::copy_to_clipboard(&output)?;
-                        return Ok(()); // Exit after copying
-                    }
-                }
-
-                // Copy full block (command + output)
-                KeyCode::Char('Y') => {
-                    if let Some(full) = app.get_selected_full() {
-                        tmux::copy_to_clipboard(&full)?;
-                        return Ok(()); // Exit after copying
-                    }
-                }
-
-                // Copy command only
-                KeyCode::Char('c') => {
-                    if let Some(cmd) = app.get_selected_command() {
-                        tmux::copy_to_clipboard(&cmd)?;
-                        return Ok(()); // Exit after copying
-                    }
-                }
-
-                // Copy debug output to system clipboard (for diagnosing parsing issues)
-                KeyCode::Char('D') => {
-                    if let Some(debug) = app.get_selected_debug() {
-                        tmux::copy_to_clipboard(&debug)?;
-                        return Ok(()); // Exit after copying
-                    }
-                }
-
-                _ => {}
+        if let Event::Key(key) = event::read()?
+            && let Some(action) = get_action(key, app)
+        {
+            match app.update(action)? {
+                UpdateResult::Quit => return Ok(()),
+                UpdateResult::Continue => {}
             }
         }
+    }
+}
+
+/// Map a key event to an action based on current application state
+fn get_action(key: KeyEvent, app: &App) -> Option<Action> {
+    // Search mode key mappings
+    if app.is_searching {
+        return match key.code {
+            KeyCode::Enter => Some(Action::ExitSearch),
+            KeyCode::Esc => Some(Action::ClearSearch),
+            KeyCode::Backspace => Some(Action::SearchBackspace),
+            KeyCode::Up => Some(Action::Previous),
+            KeyCode::Down => Some(Action::Next),
+            // Ctrl+c should quit even in search mode
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Quit)
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Next)
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Previous)
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::ScrollDown)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::ScrollUp)
+            }
+            // Only accept unmodified characters as search input
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                Some(Action::SearchInput(c))
+            }
+            _ => None,
+        };
+    }
+
+    // Normal mode key mappings
+    match key.code {
+        KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Esc => {
+            if !app.search_query.is_empty() {
+                Some(Action::ClearSearch)
+            } else {
+                Some(Action::Quit)
+            }
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+
+        KeyCode::Char('/') => Some(Action::EnterSearch),
+
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::Next),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::Previous),
+
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::ScrollDown)
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::ScrollUp)
+        }
+
+        KeyCode::Char('y') => Some(Action::CopyOutput),
+        KeyCode::Char('Y') => Some(Action::CopyFull),
+        KeyCode::Char('c') => Some(Action::CopyCommand),
+        KeyCode::Char('D') => Some(Action::CopyDebug),
+
+        _ => None,
     }
 }

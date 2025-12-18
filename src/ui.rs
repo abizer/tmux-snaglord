@@ -40,29 +40,8 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         .enumerate()
         .map(|(visual_idx, &real_idx)| {
             let block = &app.blocks[real_idx];
-            // Use pre-computed clean command (ANSI stripped at parse time)
-            let clean_cmd = &block.clean_command;
-
-            // Truncate long commands
-            let display = if clean_cmd.len() > 40 {
-                format!("{}…", &clean_cmd[..39])
-            } else {
-                clean_cmd.clone()
-            };
-
-            // Style: dim line numbers, white commands
             let is_selected = selected_idx == Some(visual_idx);
-            let num_style = if is_selected {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            let cmd_style = Style::default().fg(Color::White);
-
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{:3} ", visual_idx + 1), num_style),
-                Span::styled(display, cmd_style),
-            ]))
+            format_list_item(visual_idx, &block.clean_command, is_selected)
         })
         .collect();
 
@@ -191,4 +170,26 @@ fn render_help_bar(frame: &mut Frame, area: ratatui::layout::Rect) {
     );
 
     frame.render_widget(paragraph, area);
+}
+
+/// Format a single list item with consistent styling
+fn format_list_item(index: usize, command: &str, is_selected: bool) -> ListItem<'static> {
+    // Truncate long commands
+    let display = if command.len() > 40 {
+        format!("{}…", &command[..39])
+    } else {
+        command.to_string()
+    };
+
+    let num_style = if is_selected {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let cmd_style = Style::default().fg(Color::White);
+
+    ListItem::new(Line::from(vec![
+        Span::styled(format!("{:3} ", index + 1), num_style),
+        Span::styled(display, cmd_style),
+    ]))
 }
