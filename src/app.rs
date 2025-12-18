@@ -6,9 +6,16 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::widgets::ListState;
 
 use crate::action::Action;
-use crate::parser::CommandBlock;
+use crate::parser::{find_json_candidates, CommandBlock, JsonBlock};
 use crate::tmux;
 use crate::utils::{escape_debug, strip_ansi};
+
+/// Application mode (Commands view or JSON view)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Commands,
+    Json,
+}
 
 /// Result of processing an action
 pub enum UpdateResult {
@@ -20,20 +27,34 @@ pub enum UpdateResult {
 
 /// Main application state
 pub struct App {
+    /// Current view mode
+    pub mode: Mode,
+
+    // Command state
     /// Parsed command blocks
     pub blocks: Vec<CommandBlock>,
     /// State for the command list widget
     pub list_state: ListState,
+    /// Indices of blocks that match the current filter
+    pub filtered_indices: Vec<usize>,
+    /// Indices of blocks selected for scratchpad (insertion order)
+    pub selection: Vec<usize>,
+
+    // JSON state
+    /// Parsed JSON blocks
+    pub json_blocks: Vec<JsonBlock>,
+    /// State for the JSON list widget
+    pub json_list_state: ListState,
+    /// Indices of JSON blocks that match the current filter
+    pub json_filtered_indices: Vec<usize>,
+
+    // Shared state
     /// Vertical scroll offset for the output pane
     pub scroll_offset: u16,
     /// Current search query
     pub search_query: String,
     /// Whether we're in search mode
     pub is_searching: bool,
-    /// Indices of blocks that match the current filter
-    pub filtered_indices: Vec<usize>,
-    /// Indices of blocks selected for scratchpad (insertion order)
-    pub selection: Vec<usize>,
 }
 
 impl App {
@@ -43,17 +64,28 @@ impl App {
         if !blocks.is_empty() {
             list_state.select(Some(0));
         }
-
         let filtered_indices = (0..blocks.len()).collect();
 
+        // Parse JSONs from command outputs
+        let json_blocks = find_json_candidates(&blocks);
+        let mut json_list_state = ListState::default();
+        if !json_blocks.is_empty() {
+            json_list_state.select(Some(0));
+        }
+        let json_filtered_indices = (0..json_blocks.len()).collect();
+
         Self {
+            mode: Mode::Commands,
             blocks,
             list_state,
+            filtered_indices,
+            selection: Vec::new(),
+            json_blocks,
+            json_list_state,
+            json_filtered_indices,
             scroll_offset: 0,
             search_query: String::new(),
             is_searching: false,
-            filtered_indices,
-            selection: Vec::new(),
         }
     }
 
@@ -91,42 +123,93 @@ impl App {
             }
 
             Action::CopyOutput => {
-                if let Some(output) = self.get_output_payload() {
-                    tmux::copy_to_clipboard(&output)?;
-                    return Ok(UpdateResult::Quit);
+                match self.mode {
+                    Mode::Commands => {
+                        if let Some(output) = self.get_output_payload() {
+                            tmux::copy_to_clipboard(&output)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
+                    Mode::Json => {
+                        // In JSON mode, y copies the raw (minified) JSON
+                        if let Some(block) = self.get_selected_json_block() {
+                            tmux::copy_to_clipboard(&block.raw)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
                 }
             }
             Action::CopyFull => {
-                if let Some(full) = self.get_full_payload() {
-                    tmux::copy_to_clipboard(&full)?;
-                    return Ok(UpdateResult::Quit);
+                match self.mode {
+                    Mode::Commands => {
+                        if let Some(full) = self.get_full_payload() {
+                            tmux::copy_to_clipboard(&full)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
+                    Mode::Json => {
+                        // In JSON mode, Y copies the pretty-printed JSON
+                        if let Some(block) = self.get_selected_json_block() {
+                            tmux::copy_to_clipboard(&block.pretty)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
                 }
             }
             Action::CopyCommand => {
-                if let Some(cmd) = self.get_command_payload() {
+                // CopyCommand only applies in Commands mode
+                if self.mode == Mode::Commands
+                    && let Some(cmd) = self.get_command_payload()
+                {
                     tmux::copy_to_clipboard(&cmd)?;
                     return Ok(UpdateResult::Quit);
                 }
             }
             Action::CopyDebug => {
-                if let Some(debug) = self.get_selected_debug() {
+                // CopyDebug only applies in Commands mode
+                if self.mode == Mode::Commands
+                    && let Some(debug) = self.get_selected_debug()
+                {
                     tmux::copy_to_clipboard(&debug)?;
                     return Ok(UpdateResult::Quit);
                 }
             }
 
             Action::ToggleSelection => {
-                self.toggle_selection();
+                // Selection only applies in Commands mode
+                if self.mode == Mode::Commands {
+                    self.toggle_selection();
+                }
             }
             Action::ClearSelection => {
-                self.selection.clear();
+                // Selection only applies in Commands mode
+                if self.mode == Mode::Commands {
+                    self.selection.clear();
+                }
             }
             Action::Submit => {
-                // Submit copies full content (command + output), same as Y
-                if let Some(full) = self.get_full_payload() {
-                    tmux::copy_to_clipboard(&full)?;
-                    return Ok(UpdateResult::Quit);
+                match self.mode {
+                    Mode::Commands => {
+                        // Submit copies full content (command + output), same as Y
+                        if let Some(full) = self.get_full_payload() {
+                            tmux::copy_to_clipboard(&full)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
+                    Mode::Json => {
+                        if let Some(block) = self.get_selected_json_block() {
+                            tmux::copy_to_clipboard(&block.pretty)?;
+                            return Ok(UpdateResult::Quit);
+                        }
+                    }
                 }
+            }
+            Action::SwitchMode => {
+                self.mode = match self.mode {
+                    Mode::Commands => Mode::Json,
+                    Mode::Json => Mode::Commands,
+                };
+                self.scroll_offset = 0;
             }
         }
         Ok(UpdateResult::Continue)
@@ -152,41 +235,79 @@ impl App {
 
     /// Move selection to the next item
     fn next(&mut self) {
-        if self.filtered_indices.is_empty() {
-            return;
-        }
-
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i >= self.filtered_indices.len() - 1 {
-                    0
-                } else {
-                    i + 1
+        match self.mode {
+            Mode::Commands => {
+                if self.filtered_indices.is_empty() {
+                    return;
                 }
+                let i = match self.list_state.selected() {
+                    Some(i) => {
+                        if i >= self.filtered_indices.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.list_state.select(Some(i));
             }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
+            Mode::Json => {
+                if self.json_filtered_indices.is_empty() {
+                    return;
+                }
+                let i = match self.json_list_state.selected() {
+                    Some(i) => {
+                        if i >= self.json_filtered_indices.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.json_list_state.select(Some(i));
+            }
+        }
         self.scroll_offset = 0;
     }
 
     /// Move selection to the previous item
     fn previous(&mut self) {
-        if self.filtered_indices.is_empty() {
-            return;
-        }
-
-        let i = match self.list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.filtered_indices.len() - 1
-                } else {
-                    i - 1
+        match self.mode {
+            Mode::Commands => {
+                if self.filtered_indices.is_empty() {
+                    return;
                 }
+                let i = match self.list_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.filtered_indices.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.list_state.select(Some(i));
             }
-            None => 0,
-        };
-        self.list_state.select(Some(i));
+            Mode::Json => {
+                if self.json_filtered_indices.is_empty() {
+                    return;
+                }
+                let i = match self.json_list_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.json_filtered_indices.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.json_list_state.select(Some(i));
+            }
+        }
         self.scroll_offset = 0;
     }
 
@@ -204,35 +325,72 @@ impl App {
 
     /// Update filtered results based on current search query
     fn update_search_results(&mut self) {
-        if self.search_query.is_empty() {
-            self.filtered_indices = (0..self.blocks.len()).collect();
-        } else {
-            let matcher = SkimMatcherV2::default();
-            let mut matches: Vec<(i64, usize)> = self
-                .blocks
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, block)| {
-                    let cmd_score = matcher.fuzzy_match(&block.clean_command, &self.search_query);
-                    let clean_output = strip_ansi(&block.output);
-                    let out_score = matcher.fuzzy_match(&clean_output, &self.search_query);
-                    match (cmd_score, out_score) {
-                        (Some(c), Some(o)) => Some((c.max(o), idx)),
-                        (Some(c), None) => Some((c, idx)),
-                        (None, Some(o)) => Some((o, idx)),
-                        (None, None) => None,
-                    }
-                })
-                .collect();
+        match self.mode {
+            Mode::Commands => {
+                if self.search_query.is_empty() {
+                    self.filtered_indices = (0..self.blocks.len()).collect();
+                } else {
+                    let matcher = SkimMatcherV2::default();
+                    let mut matches: Vec<(i64, usize)> = self
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            let cmd_score =
+                                matcher.fuzzy_match(&block.clean_command, &self.search_query);
+                            let clean_output = strip_ansi(&block.output);
+                            let out_score = matcher.fuzzy_match(&clean_output, &self.search_query);
+                            match (cmd_score, out_score) {
+                                (Some(c), Some(o)) => Some((c.max(o), idx)),
+                                (Some(c), None) => Some((c, idx)),
+                                (None, Some(o)) => Some((o, idx)),
+                                (None, None) => None,
+                            }
+                        })
+                        .collect();
 
-            matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-            self.filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
-        }
+                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                    self.filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                }
 
-        if !self.filtered_indices.is_empty() {
-            self.list_state.select(Some(0));
-        } else {
-            self.list_state.select(None);
+                if !self.filtered_indices.is_empty() {
+                    self.list_state.select(Some(0));
+                } else {
+                    self.list_state.select(None);
+                }
+            }
+            Mode::Json => {
+                if self.search_query.is_empty() {
+                    self.json_filtered_indices = (0..self.json_blocks.len()).collect();
+                } else {
+                    let matcher = SkimMatcherV2::default();
+                    let mut matches: Vec<(i64, usize)> = self
+                        .json_blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            // Search in both name and raw JSON content
+                            let name_score = matcher.fuzzy_match(&block.name, &self.search_query);
+                            let raw_score = matcher.fuzzy_match(&block.raw, &self.search_query);
+                            match (name_score, raw_score) {
+                                (Some(n), Some(r)) => Some((n.max(r), idx)),
+                                (Some(n), None) => Some((n, idx)),
+                                (None, Some(r)) => Some((r, idx)),
+                                (None, None) => None,
+                            }
+                        })
+                        .collect();
+
+                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                    self.json_filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                }
+
+                if !self.json_filtered_indices.is_empty() {
+                    self.json_list_state.select(Some(0));
+                } else {
+                    self.json_list_state.select(None);
+                }
+            }
         }
         self.scroll_offset = 0;
     }
@@ -316,5 +474,13 @@ impl App {
     pub fn get_selected_block(&self) -> Option<&CommandBlock> {
         self.get_current_data_index()
             .and_then(|i| self.blocks.get(i))
+    }
+
+    /// Get the currently selected JSON block for display
+    pub fn get_selected_json_block(&self) -> Option<&JsonBlock> {
+        self.json_list_state
+            .selected()
+            .and_then(|i| self.json_filtered_indices.get(i).copied())
+            .and_then(|real_idx| self.json_blocks.get(real_idx))
     }
 }

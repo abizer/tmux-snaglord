@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
-use crate::app::App;
+use crate::app::{App, Mode};
 
 /// Render the application UI
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -25,9 +25,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(vertical[0]);
 
-    render_command_list(frame, app, chunks[0]);
+    render_list_pane(frame, app, chunks[0]);
     render_output_pane(frame, app, chunks[1]);
     render_footer(frame, app, vertical[1]);
+}
+
+/// Render the left list pane based on current mode
+fn render_list_pane(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    match app.mode {
+        Mode::Commands => render_command_list(frame, app, area),
+        Mode::Json => render_json_list(frame, app, area),
+    }
 }
 
 /// Render the command list in the left pane
@@ -46,6 +54,18 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         })
         .collect();
 
+    // Build title with mode tabs and count info
+    let mode_tabs = Line::from(vec![
+        Span::styled(
+            "[Commands]",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ", Style::default()),
+        Span::styled("JSON", Style::default().fg(Color::DarkGray)),
+    ]);
+
     // Left title: shows selection count if items are pinned, otherwise "Commands (X/Y)"
     let left_title = if !app.selection.is_empty() {
         Line::from(vec![Span::styled(
@@ -54,21 +74,19 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         )])
     } else if let Some(idx) = selected_idx {
         Line::from(vec![Span::styled(
-            format!(" Commands ({}/{}) ", idx + 1, app.filtered_indices.len()),
-            Style::default().fg(Color::Green),
+            format!(" ({}/{}) ", idx + 1, app.filtered_indices.len()),
+            Style::default().fg(Color::DarkGray),
         )])
     } else {
-        Line::from(vec![Span::styled(
-            " Commands ",
-            Style::default().fg(Color::Green),
-        )])
+        Line::from(vec![])
     };
 
-    // Build block with left title
+    // Build block with mode tabs and count
     let mut block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title_top(left_title);
+        .title_top(mode_tabs)
+        .title_top(left_title.alignment(Alignment::Right));
 
     // Add right-aligned filter indicator when search is active
     if !app.search_query.is_empty() {
@@ -96,20 +114,127 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     frame.render_stateful_widget(list, area, &mut app.list_state);
 }
 
+/// Render the JSON list in the left pane
+fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let selected_idx = app.json_list_state.selected();
+
+    let items: Vec<ListItem> = app
+        .json_filtered_indices
+        .iter()
+        .enumerate()
+        .map(|(visual_idx, &real_idx)| {
+            let block = &app.json_blocks[real_idx];
+            let is_focused = selected_idx == Some(visual_idx);
+            format_json_list_item(visual_idx, &block.name, is_focused)
+        })
+        .collect();
+
+    // Build title with mode tabs
+    let mode_tabs = Line::from(vec![
+        Span::styled("Commands", Style::default().fg(Color::DarkGray)),
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            "[JSON]",
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    // Count info
+    let count_title = if let Some(idx) = selected_idx {
+        Line::from(vec![Span::styled(
+            format!(" ({}/{}) ", idx + 1, app.json_filtered_indices.len()),
+            Style::default().fg(Color::DarkGray),
+        )])
+    } else {
+        Line::from(vec![])
+    };
+
+    let mut block = Block::default()
+        .borders(Borders::RIGHT)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title_top(mode_tabs)
+        .title_top(count_title.alignment(Alignment::Right));
+
+    // Add search filter indicator
+    if !app.search_query.is_empty() {
+        let filter_title = Line::from(vec![Span::styled(
+            format!(
+                " \"{}\" ({} of {}) ",
+                app.search_query,
+                app.json_filtered_indices.len(),
+                app.json_blocks.len()
+            ),
+            Style::default().fg(Color::Yellow),
+        )]);
+        block = block.title_bottom(filter_title);
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .bg(Color::DarkGray),
+        )
+        .highlight_symbol("▶ ");
+
+    frame.render_stateful_widget(list, area, &mut app.json_list_state);
+}
+
+/// Format a JSON list item
+fn format_json_list_item(index: usize, name: &str, is_focused: bool) -> ListItem<'static> {
+    // Truncate long names
+    let display = if name.len() > 38 {
+        format!("{}…", &name[..37])
+    } else {
+        name.to_string()
+    };
+
+    let num_style = if is_focused {
+        Style::default().fg(Color::Blue)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let name_style = Style::default().fg(Color::White);
+
+    ListItem::new(Line::from(vec![
+        Span::styled(format!("{:3} ", index + 1), num_style),
+        Span::styled(display, name_style),
+    ]))
+}
+
 /// Render the output pane on the right
 fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // Convert ANSI escape codes to ratatui styled Text
-    // Show command + output together
-    let content = if let Some(block) = app.get_selected_block() {
-        let full = format!("{}\n{}", block.command, block.output);
-        let bytes = full.into_bytes();
-        bytes
-            .into_text()
-            .unwrap_or_else(|_| "Error rendering".into())
-    } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
-        "No matching commands".into()
-    } else {
-        "Select a command with j/k...".into()
+    let content = match app.mode {
+        Mode::Commands => {
+            // Convert ANSI escape codes to ratatui styled Text
+            // Show command + output together
+            if let Some(block) = app.get_selected_block() {
+                let full = format!("{}\n{}", block.command, block.output);
+                let bytes = full.into_bytes();
+                bytes
+                    .into_text()
+                    .unwrap_or_else(|_| "Error rendering".into())
+            } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
+                "No matching commands".into()
+            } else {
+                "Select a command with j/k...".into()
+            }
+        }
+        Mode::Json => {
+            if let Some(block) = app.get_selected_json_block() {
+                block.pretty.clone().into()
+            } else if app.json_blocks.is_empty() {
+                "No JSON objects found in history.".into()
+            } else if app.json_filtered_indices.is_empty() && !app.search_query.is_empty() {
+                "No matching JSON objects".into()
+            } else {
+                "Select a JSON object with j/k...".into()
+            }
+        }
     };
 
     let paragraph = Paragraph::new(content).scroll((app.scroll_offset, 0));
@@ -122,7 +247,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if app.is_searching {
         render_search_bar(frame, app, area);
     } else {
-        render_help_bar(frame, area);
+        render_help_bar(frame, app, area);
     }
 }
 
@@ -144,33 +269,57 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 }
 
 /// Render the help bar
-fn render_help_bar(frame: &mut Frame, area: ratatui::layout::Rect) {
+fn render_help_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let key_style = Style::default().fg(Color::Green);
     let desc_style = Style::default().fg(Color::White);
     let sep_style = Style::default().fg(Color::DarkGray);
 
-    let help = Line::from(vec![
-        Span::styled(" / ", key_style),
-        Span::styled("search", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("j/k ", key_style),
-        Span::styled("nav", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("spc ", key_style),
-        Span::styled("pin", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("Y ", key_style),
-        Span::styled("cmd+out", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("y ", key_style),
-        Span::styled("out", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("c ", key_style),
-        Span::styled("cmd", desc_style),
-        Span::styled("  ·  ", sep_style),
-        Span::styled("q ", key_style),
-        Span::styled("quit", desc_style),
-    ]);
+    let help = match app.mode {
+        Mode::Commands => Line::from(vec![
+            Span::styled("TAB ", key_style),
+            Span::styled("mode", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("/ ", key_style),
+            Span::styled("search", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("j/k ", key_style),
+            Span::styled("nav", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("spc ", key_style),
+            Span::styled("pin", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("Y ", key_style),
+            Span::styled("cmd+out", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("y ", key_style),
+            Span::styled("out", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("c ", key_style),
+            Span::styled("cmd", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("q ", key_style),
+            Span::styled("quit", desc_style),
+        ]),
+        Mode::Json => Line::from(vec![
+            Span::styled("TAB ", key_style),
+            Span::styled("mode", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("/ ", key_style),
+            Span::styled("search", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("j/k ", key_style),
+            Span::styled("nav", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("y ", key_style),
+            Span::styled("raw", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("Y ", key_style),
+            Span::styled("pretty", desc_style),
+            Span::styled("  ·  ", sep_style),
+            Span::styled("q ", key_style),
+            Span::styled("quit", desc_style),
+        ]),
+    };
 
     let paragraph = Paragraph::new(help).block(
         Block::default()

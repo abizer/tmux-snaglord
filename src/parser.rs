@@ -1,6 +1,7 @@
 //! Parse tmux pane content into command blocks
 
 use regex::Regex;
+use serde_json::Value;
 
 /// Default regex pattern for detecting shell prompts.
 /// Matches zsh-style prompts: path starting with / or ~, followed by ` % `
@@ -17,6 +18,17 @@ pub struct CommandBlock {
     pub command_text: String,
     /// The output following the command
     pub output: String,
+}
+
+/// A block representing a detected JSON object
+#[derive(Debug, Clone)]
+pub struct JsonBlock {
+    /// Short description (e.g. "{ key1, key2, ... }")
+    pub name: String,
+    /// Formatted JSON for display
+    pub pretty: String,
+    /// Raw JSON string for copying
+    pub raw: String,
 }
 
 /// Tracks shell syntax state for detecting incomplete commands
@@ -286,6 +298,96 @@ pub fn parse_history(raw_content: &str, prompt_regex: &Regex) -> Vec<CommandBloc
     blocks.reverse();
 
     blocks
+}
+
+/// Scan command blocks for valid JSON substrings
+pub fn find_json_candidates(blocks: &[CommandBlock]) -> Vec<JsonBlock> {
+    let mut json_blocks = Vec::new();
+
+    for block in blocks {
+        // Strip ANSI codes from output before JSON parsing
+        let clean_bytes = strip_ansi_escapes::strip(&block.output);
+        let text = String::from_utf8_lossy(&clean_bytes);
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            let c = chars[i];
+            // Check for start of object or array
+            if c == '{' || c == '[' {
+                let start_index = i;
+                let mut stack = vec![c];
+                let mut j = i + 1;
+                let mut in_string = false;
+                let mut escaped = false;
+
+                while j < chars.len() && !stack.is_empty() {
+                    let curr = chars[j];
+
+                    if escaped {
+                        escaped = false;
+                    } else if curr == '\\' && in_string {
+                        escaped = true;
+                    } else if curr == '"' {
+                        in_string = !in_string;
+                    } else if !in_string {
+                        match curr {
+                            '{' | '[' => stack.push(curr),
+                            '}' => {
+                                if stack.last() == Some(&'{') {
+                                    stack.pop();
+                                }
+                            }
+                            ']' => {
+                                if stack.last() == Some(&'[') {
+                                    stack.pop();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    j += 1;
+                }
+
+                if stack.is_empty() {
+                    // Potential JSON found
+                    let candidate: String = chars[start_index..j].iter().collect();
+                    if let Ok(value) = serde_json::from_str::<Value>(&candidate) {
+                        let pretty = serde_json::to_string_pretty(&value)
+                            .unwrap_or_else(|_| candidate.clone());
+
+                        // Generate a short name/preview
+                        let name = match &value {
+                            Value::Object(map) => {
+                                let keys: Vec<&str> =
+                                    map.keys().take(3).map(|k| k.as_str()).collect();
+                                let suffix = if map.len() > 3 { ", ..." } else { "" };
+                                format!("{{ {} }}{}", keys.join(", "), suffix)
+                            }
+                            Value::Array(arr) => format!("[Array({})]", arr.len()),
+                            _ => "JSON Value".to_string(),
+                        };
+
+                        json_blocks.push(JsonBlock {
+                            name,
+                            pretty,
+                            raw: candidate,
+                        });
+
+                        i = j; // Skip past this JSON
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    json_blocks
 }
 
 #[cfg(test)]
