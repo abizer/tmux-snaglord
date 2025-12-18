@@ -142,13 +142,6 @@ fn run_tui(args: RunArgs) -> Result<()> {
     // Parse into command blocks
     let blocks = parser::parse_history(&content, &prompt_re);
 
-    if blocks.is_empty() {
-        eprintln!("No commands found.");
-        eprintln!("Current pattern: {}", prompt_pattern);
-        eprintln!("\nTry 'tmux-snag init' to auto-detect your prompt.");
-        return Ok(());
-    }
-
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -157,7 +150,7 @@ fn run_tui(args: RunArgs) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run the app
-    let mut app = App::new(blocks, use_nerd_fonts);
+    let mut app = App::new(blocks, use_nerd_fonts, prompt_pattern);
 
     // Apply the requested mode if present
     if let Some(mode) = args.mode {

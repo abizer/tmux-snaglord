@@ -383,6 +383,27 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
                 bytes
                     .into_text()
                     .unwrap_or_else(|_| "Error rendering".into())
+            } else if app.blocks.is_empty() {
+                // No commands found - show diagnostic info
+                Text::from(vec![
+                    Line::from(Span::styled(
+                        "No commands found.",
+                        Style::default().fg(Color::Yellow),
+                    )),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Pattern: ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            app.prompt_pattern.clone(),
+                            Style::default().fg(Color::White),
+                        ),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Try 'tmux-snag init' to auto-detect your prompt.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ])
             } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
                 "No matching commands".into()
             } else {
