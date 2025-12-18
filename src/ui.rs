@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 use crate::app::App;
@@ -87,10 +87,7 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
         "Select a command with j/k...".into()
     };
 
-    let paragraph = Paragraph::new(content)
-        .block(Block::default().title(title))
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll_offset, 0));
+    let paragraph = Paragraph::new(content).scroll((app.scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
 }
