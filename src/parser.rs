@@ -146,11 +146,19 @@ fn build_block(
     let clean_bytes = strip_ansi_escapes::strip(&full_command);
 
     // Filter out git status lines from output
-    let filtered_output: Vec<&str> = output_lines
+    let mut filtered_output: Vec<&str> = output_lines
         .iter()
         .filter(|line| !is_git_status_line(line))
         .copied()
         .collect();
+
+    // Trim trailing empty lines (often captured from empty terminal space below last command)
+    while filtered_output
+        .last()
+        .is_some_and(|line| line.trim().is_empty())
+    {
+        filtered_output.pop();
+    }
 
     // Build command_text: strip prompt from first line, keep continuation lines as-is
     let mut command_text = String::new();
