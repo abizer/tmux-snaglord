@@ -48,7 +48,7 @@ struct RunArgs {
     #[arg(long)]
     preset: Option<String>,
 
-    /// Target tmux pane (e.g., "%0" or "session:window.pane")
+    /// Target tmux pane (e.g., "%0", "session:window.pane", or "previous" for last active pane)
     #[arg(short = 't', long)]
     target: Option<String>,
 
