@@ -7,7 +7,8 @@ commands from their output using regex prompt detection, and presents them in a
 structured interface. Fuzzy search history, extract JSON blobs, find file paths,
 and copy content to your clipboard. Copying in tmux has never been so easy.
 
-[Install](#install) · [Quick start](#quick-start) · [Usage](#usage) · [Configuration](#configuration)
+[Install](#install) · [Quick start](#quick-start) · [Usage](#usage) ·
+[Configuration](#configuration)
 
 ## Demo
 
@@ -87,7 +88,7 @@ Usage: tmux-snag [OPTIONS]
 
 Options:
   -p, --prompt <REGEX>    Regex pattern to identify command prompts
-      --preset <NAME>     Preset pattern name (simple, zsh, oh-my-zsh, starship, fish)
+      --preset <NAME>     Preset pattern name (bash, zsh, fish, robbyrussell, starship, dollar, hash)
   -t, --target <PANE>     Target tmux pane (e.g., "%0" or "session:window.pane")
 ```
 
@@ -140,8 +141,12 @@ file2.txt             ← output
 hello world           ← output
 ```
 
-The default pattern matches zsh-style prompts (`~/path % `). If no commands are
-found, you likely need a different preset or custom pattern for your shell.
+If no commands are found, run `tmux-snag init` to auto-detect the best preset
+for your shell, or configure a custom pattern.
+
+**Note:** Because this tool relies on regex pattern matching, detection accuracy
+depends on your prompt configuration. Heavily customized prompts or command
+output that resembles your prompt may cause incorrect parsing.
 
 ## Configuration
 
@@ -157,13 +162,15 @@ preset = "starship"
 
 ### Presets
 
-| Name        | Pattern      | Description                 |
-| ----------- | ------------ | --------------------------- |
-| `simple`    | `^\$ `       | Simple bash prompt          |
-| `zsh`       | `^.*% `      | Default zsh prompt          |
-| `oh-my-zsh` | `^.*➜ `      | Oh My Zsh default theme     |
-| `starship`  | `^.*[❯➜] `   | Starship cross-shell prompt |
-| `fish`      | `^.*> `      | Fish default                |
+| Name           | Pattern                           | Description                     |
+| -------------- | --------------------------------- | ------------------------------- |
+| `bash`         | `^[\w.-]+@[\w.-]+:[~\w./-]+[#$] ` | Standard bash (user@host:path$) |
+| `zsh`          | `^[\w.-]+% `                      | Default zsh (hostname%)         |
+| `fish`         | `^.*?[\w./-]+> `                  | Fish default prompt             |
+| `robbyrussell` | `^➜  `                            | Oh My Zsh robbyrussell theme    |
+| `starship`     | `^❯ `                             | Starship default prompt         |
+| `dollar`       | `^\$ `                            | Simple $ prompt                 |
+| `hash`         | `^# `                             | Root shell prompt               |
 
 ## tmux integration
 

@@ -9,30 +9,46 @@ pub struct Preset {
 
 /// Available presets for common shell configurations
 pub const PRESETS: &[Preset] = &[
+    // Standard: user@host:~/path$
     Preset {
-        name: "simple",
-        regex: r"^\$ ",
-        description: "Simple bash prompt ($ )",
+        name: "bash",
+        regex: r"^[\w.-]+@[\w.-]+:[~\w./-]+[#$] ",
+        description: "Standard bash (user@host:path$)",
     },
+    // Default zsh: hostname%
     Preset {
         name: "zsh",
-        regex: r"^.*% ",
-        description: "Default zsh prompt",
+        regex: r"^[\w.-]+% ",
+        description: "Default zsh (hostname%)",
     },
-    Preset {
-        name: "oh-my-zsh",
-        regex: r"^.*➜ ",
-        description: "Oh My Zsh default theme",
-    },
-    Preset {
-        name: "starship",
-        regex: r"^.*[❯➜] ",
-        description: "Starship cross-shell prompt",
-    },
+    // Fish default: path>
     Preset {
         name: "fish",
-        regex: r"^.*> ",
+        regex: r"^.*?[\w./-]+> ",
         description: "Fish default prompt",
+    },
+    // Oh My Zsh robbyrussell theme: ➜  dir
+    Preset {
+        name: "robbyrussell",
+        regex: r"^➜  ",
+        description: "Oh My Zsh robbyrussell theme",
+    },
+    // Starship default symbol
+    Preset {
+        name: "starship",
+        regex: r"^❯ ",
+        description: "Starship default prompt",
+    },
+    // Simple fallbacks
+    Preset {
+        name: "dollar",
+        regex: r"^\$ ",
+        description: "Simple $ prompt",
+    },
+    Preset {
+        name: "hash",
+        regex: r"^# ",
+        description: "Root shell prompt",
     },
 ];
 

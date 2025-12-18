@@ -3,9 +3,9 @@
 use regex::Regex;
 use serde_json::Value;
 
-/// Default regex pattern for detecting shell prompts.
-/// Matches zsh-style prompts: path starting with / or ~, followed by ` % `
-pub const DEFAULT_PROMPT_REGEX: &str = r#"^[/~].* % "#;
+/// Test regex for zsh-style prompts with path (e.g., `~/code % `)
+#[cfg(test)]
+const ZSH_PATH_PROMPT: &str = r#"^[/~].* % "#;
 
 /// A block representing a command and its output
 #[derive(Debug, Clone)]
@@ -835,13 +835,13 @@ mod tests {
         assert!(blocks[1].output.contains("\x1b[32mM"));
     }
 
-    // === Default regex tests ===
-    // These test the actual DEFAULT_PROMPT_REGEX constant
+    // === Zsh path prompt tests ===
+    // These test the ZSH_PATH_PROMPT pattern (~/path % )
 
     #[test]
     fn test_default_regex_zsh_percent() {
         let content = "~/code % echo hello\nhello\n~/code % ls\nfile\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         assert_eq!(blocks.len(), 2);
@@ -851,7 +851,7 @@ mod tests {
     fn test_default_regex_with_ansi_colors() {
         // Colored zsh prompt like the user has
         let content = "\x1b[36m~/c/project \x1b[32m%\x1b[39m gst\nM file.rs\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         assert_eq!(blocks.len(), 1);
@@ -862,7 +862,7 @@ mod tests {
     fn test_default_regex_ignores_code_snippets() {
         // Code with $ or # inside quotes should NOT be matched as prompts
         let content = "~/code % cat test.rs\nlet x = \"$ echo hello\";\nlet y = '# comment';\n~/code % ls\nfile.rs\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         // Only the two actual prompts should match, not the code lines
@@ -878,7 +878,7 @@ mod tests {
         // Cargo build output with progress bars containing % should NOT match as prompts
         // This was a real bug: "100% " in indented cargo output matched as zsh prompt
         let content = "~/code % cargo build\n   Compiling foo v0.1.0\n    Finished `dev` profile target(s)\n~/code % cargo run\n   Compiling foo v0.1.0\n       100% building\n    Finished `dev` profile target(s)\n     Running `target/debug/foo`\nhello world\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         // Only the two actual prompts should match
@@ -894,7 +894,7 @@ mod tests {
         // Empty prompts (just prompt char + whitespace) should NOT match
         // This happens with tmux scrollback when prompt is redrawn or user presses Enter
         let content = "~/code %                                                        \n~/code %                                                        \n~/code % echo foo                                               \nfoo\n~/code %                                                        \n~/code % ls\nfile.txt\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         // Only prompts with actual commands should match
@@ -908,7 +908,7 @@ mod tests {
         // Real zsh prompt with right-aligned git status separated by many spaces
         // The command_text field should contain only "history", not the git branch
         let content = "~/c/tmux-copy-tool % history                                                                                                                main\n  123  ls\n  124  cd foo\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         assert_eq!(blocks.len(), 1);
@@ -922,7 +922,7 @@ mod tests {
     fn test_command_text_without_right_prompt() {
         // Command without right-aligned prompt should work normally
         let content = "~/code % echo hello\nworld\n";
-        let re = Regex::new(super::DEFAULT_PROMPT_REGEX).unwrap();
+        let re = Regex::new(super::ZSH_PATH_PROMPT).unwrap();
         let blocks = parse_history(content, &re);
 
         assert_eq!(blocks.len(), 1);

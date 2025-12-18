@@ -44,7 +44,7 @@ struct RunArgs {
     #[arg(short, long)]
     prompt: Option<String>,
 
-    /// Preset pattern name (simple, zsh, oh-my-zsh, starship, fish)
+    /// Preset pattern name (bash, zsh, fish, robbyrussell, starship, dollar, hash)
     #[arg(long)]
     preset: Option<String>,
 
@@ -75,7 +75,7 @@ fn run_init(target: Option<&str>) -> Result<()> {
             let count = blocks.len();
 
             if count > 0 {
-                eprintln!("  {:12} {} commands", preset.name, count);
+                eprintln!("  {:12} {:3} commands  ({})", preset.name, count, preset.description);
                 match best_match {
                     Some((_, best_count)) if count > best_count => {
                         best_match = Some((preset, count));
@@ -287,17 +287,25 @@ fn resolve_prompt_pattern(args: &RunArgs, config: &config::Config) -> Result<Str
         return Ok(p.clone());
     }
 
-    // 4. Config preset (warn and fallback if invalid)
+    // 4. Config preset (fatal if invalid)
     if let Some(name) = &config.preset {
-        if let Some(preset) = presets::get_by_name(name) {
-            return Ok(preset.regex.to_string());
-        }
-        eprintln!(
-            "Warning: Unknown preset '{}' in config, using default",
-            name
-        );
+        return presets::get_by_name(name)
+            .map(|p| p.regex.to_string())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown preset '{}' in config. Available: {}",
+                    name,
+                    presets::PRESETS
+                        .iter()
+                        .map(|p| p.name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
     }
 
-    // 5. Default
-    Ok(parser::DEFAULT_PROMPT_REGEX.to_string())
+    // 5. No configuration found
+    Err(anyhow::anyhow!(
+        "No prompt pattern configured. Run 'tmux-snag init' to auto-detect your shell prompt."
+    ))
 }
