@@ -18,7 +18,7 @@ and copy content to your clipboard. Copying in tmux has never been so easy.
 ┌─ Commands ──────────────────────────┐┌─ Output ──────────────────────────────┐
 │  git status                         ││{                                      │
 │  curl api.local/users               ││  "id": 12,                            │
-│> cat config.json                    ││  "name": "tmux-snaglord",                 │
+│> cat config.json                    ││  "name": "tmux-snaglord",             │
 │  ls -la                             ││  "features": [                        │
 │                                     ││    "parsing",                         │
 │                                     ││    "tui",                             │
@@ -145,8 +145,8 @@ file2.txt             ← output
 hello world           ← output
 ```
 
-If no commands are found, run `tmux-snaglord init` to auto-detect the best preset
-for your shell, or configure a custom pattern.
+If no commands are found, run `tmux-snaglord init` to auto-detect the best
+preset for your shell, or configure a custom pattern.
 
 **Note:** Because this tool relies on regex pattern matching, detection accuracy
 depends on your prompt configuration. Heavily customized prompts or command
