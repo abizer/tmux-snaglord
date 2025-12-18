@@ -81,11 +81,14 @@ pub struct App {
     // Error state
     /// Transient error message to display in UI
     pub error_msg: Option<String>,
+
+    /// ID of the tmux pane to paste into
+    pub target_pane_id: String,
 }
 
 impl App {
     /// Create a new App with the given content, prompt regex, and pattern string
-    pub fn new(content: &str, prompt_re: Regex, nerd_fonts: bool, prompt_pattern: String) -> Self {
+    pub fn new(content: &str, prompt_re: Regex, nerd_fonts: bool, prompt_pattern: String, target_pane_id: String) -> Self {
         let mut app = Self {
             mode: Mode::Commands,
             nerd_fonts,
@@ -105,6 +108,7 @@ impl App {
             is_searching: false,
             prompt_re,
             error_msg: None,
+            target_pane_id,
         };
 
         app.ingest_content(content);
@@ -149,7 +153,8 @@ impl App {
 
     /// Capture content from a specific pane and reload the app state
     fn reload_from_pane(&mut self, target: &str) -> Result<()> {
-        let content = tmux::capture_pane(Some(target))?;
+        let pane_id = tmux::resolve_pane_id(Some(target))?;
+        let content = tmux::capture_pane(&pane_id)?;
         self.ingest_content(&content);
         Ok(())
     }
@@ -329,6 +334,19 @@ impl App {
             Action::LoadPreviousPane => {
                 if let Err(e) = self.reload_from_pane("previous") {
                     self.error_msg = Some(format!("Failed to load previous pane: {}", e));
+                }
+            }
+            Action::Paste => {
+                // Paste the same content that would be copied with the primary copy key
+                let payload = match self.mode {
+                    Mode::Commands => self.get_full_payload(),
+                    Mode::Json => self.get_selected_json_block().map(|b| b.pretty.clone()),
+                    Mode::Paths => self.get_selected_path_block().map(|b| b.raw.clone()),
+                };
+
+                if let Some(content) = payload {
+                    tmux::send_keys(&self.target_pane_id, &content)?;
+                    return Ok(UpdateResult::Quit);
                 }
             }
         }

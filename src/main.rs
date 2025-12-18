@@ -69,7 +69,8 @@ fn main() -> Result<()> {
 fn run_init(target: Option<&str>) -> Result<()> {
     eprintln!("Detecting prompt pattern...\n");
 
-    let content = tmux::capture_pane(target).context("Failed to capture tmux pane")?;
+    let target_pane_id = tmux::resolve_pane_id(target)?;
+    let content = tmux::capture_pane(&target_pane_id).context("Failed to capture tmux pane")?;
 
     let mut best_match: Option<(&presets::Preset, usize)> = None;
 
@@ -136,11 +137,14 @@ fn run_tui(args: RunArgs) -> Result<()> {
         prompt_pattern
     ))?;
 
+    // Resolve target pane ID first (needed for both capture and paste)
+    let target_pane_id = tmux::resolve_pane_id(args.target.as_deref())?;
+
     // Capture tmux pane content
-    let content = tmux::capture_pane(args.target.as_deref())?;
+    let content = tmux::capture_pane(&target_pane_id)?;
 
     // Create app with content and prompt regex
-    let mut app = App::new(&content, prompt_re, use_nerd_fonts, prompt_pattern);
+    let mut app = App::new(&content, prompt_re, use_nerd_fonts, prompt_pattern, target_pane_id);
 
     // Setup terminal
     enable_raw_mode()?;
@@ -266,6 +270,7 @@ fn get_action(key: KeyEvent, app: &App) -> Option<Action> {
         KeyCode::Char('Y') => Some(Action::CopyFull),
         KeyCode::Char('c') => Some(Action::CopyCommand),
         KeyCode::Char('D') => Some(Action::CopyDebug),
+        KeyCode::Char('p') => Some(Action::Paste),
 
         _ => None,
     }

@@ -36,6 +36,31 @@ fn get_previous_pane_id() -> Result<String> {
     Ok(pane_id)
 }
 
+/// Resolve the target string (e.g., "previous", "%1") to a concrete pane ID
+///
+/// Returns the resolved pane ID that can be used with tmux commands.
+/// - `Some("previous")`: resolves to the previous (last active) pane
+/// - `Some(id)`: returns the id as-is
+/// - `None`: returns the current pane's ID
+pub fn resolve_pane_id(target: Option<&str>) -> Result<String> {
+    match target {
+        Some(PREVIOUS_PANE_TARGET) => get_previous_pane_id(),
+        Some(id) => Ok(id.to_string()),
+        None => {
+            // Default to current pane if none specified
+            let output = Command::new("tmux")
+                .args(["display-message", "-p", "#{pane_id}"])
+                .output()
+                .context("Failed to get current pane ID")?;
+
+            Ok(String::from_utf8(output.stdout)
+                .context("Invalid UTF-8 in pane ID")?
+                .trim()
+                .to_string())
+        }
+    }
+}
+
 /// Capture the content of a tmux pane
 ///
 /// Uses `tmux capture-pane` with:
@@ -44,24 +69,9 @@ fn get_previous_pane_id() -> Result<String> {
 /// - `-p`: output to stdout
 /// - `-S -5000`: capture last 5000 lines (not full history, which includes stale content)
 ///
-/// The `pane_id` can be:
-/// - `None`: capture the current pane
-/// - `Some("previous")`: capture the previous (last active) pane
-/// - `Some(id)`: capture a specific pane by ID (e.g., "%0", "session:window.pane")
-pub fn capture_pane(pane_id: Option<&str>) -> Result<String> {
-    // Resolve "previous" to the actual pane ID
-    let resolved_pane_id = match pane_id {
-        Some(PREVIOUS_PANE_TARGET) => Some(get_previous_pane_id()?),
-        Some(id) => Some(id.to_string()),
-        None => None,
-    };
-
-    let mut args = vec!["capture-pane", "-e", "-J", "-p", "-S", "-5000"];
-
-    if let Some(ref id) = resolved_pane_id {
-        args.push("-t");
-        args.push(id);
-    }
+/// The `pane_id` should be a resolved pane ID (e.g., "%0") from `resolve_pane_id`.
+pub fn capture_pane(pane_id: &str) -> Result<String> {
+    let args = vec!["capture-pane", "-e", "-J", "-p", "-S", "-5000", "-t", pane_id];
 
     let output = Command::new("tmux")
         .args(&args)
@@ -76,6 +86,25 @@ pub fn capture_pane(pane_id: Option<&str>) -> Result<String> {
     }
 
     String::from_utf8(output.stdout).context("tmux output contained invalid UTF-8")
+}
+
+/// Send content to a target pane as literal keys
+///
+/// Uses `tmux send-keys` with `-l` flag to send text literally without interpreting
+/// special characters as key names.
+pub fn send_keys(pane_id: &str, content: &str) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", pane_id, "-l", content])
+        .output()
+        .context("Failed to execute tmux send-keys")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux send-keys failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 /// Copy content to system clipboard (macOS pbcopy)

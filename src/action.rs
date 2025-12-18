@@ -49,4 +49,6 @@ pub enum Action {
     SwitchToPaths,
     /// Reload content from the previous tmux pane
     LoadPreviousPane,
+    /// Paste selection to target pane (send-keys)
+    Paste,
 }
