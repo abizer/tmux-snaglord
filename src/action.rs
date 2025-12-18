@@ -47,8 +47,8 @@ pub enum Action {
     SwitchToJson,
     /// Switch directly to Paths mode
     SwitchToPaths,
-    /// Reload content from the previous tmux pane
-    LoadPreviousPane,
+    /// Toggle between the original pane and the previous tmux pane
+    TogglePreviousPane,
     /// Paste output to target pane (send-keys)
     PasteOutput,
     /// Paste command+output to target pane (send-keys)

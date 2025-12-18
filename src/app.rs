@@ -82,8 +82,10 @@ pub struct App {
     /// Transient error message to display in UI
     pub error_msg: Option<String>,
 
-    /// ID of the tmux pane to paste into
+    /// ID of the tmux pane to paste into (current view)
     pub target_pane_id: String,
+    /// ID of the original pane where the app started
+    pub original_pane_id: String,
 }
 
 impl App {
@@ -114,6 +116,7 @@ impl App {
             is_searching: false,
             prompt_re,
             error_msg: None,
+            original_pane_id: target_pane_id.clone(),
             target_pane_id,
         };
 
@@ -162,6 +165,7 @@ impl App {
         let pane_id = tmux::resolve_pane_id(Some(target))?;
         let content = tmux::capture_pane(&pane_id)?;
         self.ingest_content(&content);
+        self.target_pane_id = pane_id;
         Ok(())
     }
 
@@ -337,9 +341,16 @@ impl App {
                 self.scroll_offset = 0;
                 self.update_search_results();
             }
-            Action::LoadPreviousPane => {
-                if let Err(e) = self.reload_from_pane("previous") {
-                    self.error_msg = Some(format!("Failed to load previous pane: {}", e));
+            Action::TogglePreviousPane => {
+                if self.target_pane_id == self.original_pane_id {
+                    if let Err(e) = self.reload_from_pane("previous") {
+                        self.error_msg = Some(format!("Failed to load previous pane: {}", e));
+                    }
+                } else {
+                    let original = self.original_pane_id.clone();
+                    if let Err(e) = self.reload_from_pane(&original) {
+                        self.error_msg = Some(format!("Failed to restore original pane: {}", e));
+                    }
                 }
             }
             Action::PasteOutput => {
