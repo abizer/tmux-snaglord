@@ -271,25 +271,11 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     };
 
     // Build block with mode tabs and count
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_top(mode_tabs)
         .title_top(left_title.alignment(Alignment::Right));
-
-    // Add right-aligned filter indicator when search is active
-    if !app.search_query.is_empty() {
-        let filter_title = Line::from(vec![Span::styled(
-            format!(
-                " \"{}\" ({} of {}) ",
-                app.search_query,
-                app.filtered_indices.len(),
-                app.blocks.len()
-            ),
-            Style::default().fg(Color::Yellow),
-        )]);
-        block = block.title_top(filter_title.alignment(Alignment::Right));
-    }
 
     let list = List::new(items)
         .block(block)
@@ -333,25 +319,11 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         Line::from(vec![])
     };
 
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_top(mode_tabs)
         .title_top(count_title.alignment(Alignment::Right));
-
-    // Add search filter indicator
-    if !app.search_query.is_empty() {
-        let filter_title = Line::from(vec![Span::styled(
-            format!(
-                " \"{}\" ({} of {}) ",
-                app.search_query,
-                app.json_filtered_indices.len(),
-                app.json_blocks.len()
-            ),
-            Style::default().fg(Color::Yellow),
-        )]);
-        block = block.title_bottom(filter_title);
-    }
 
     let list = List::new(items)
         .block(block)
@@ -420,25 +392,11 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
         Line::from(vec![])
     };
 
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_top(mode_tabs)
         .title_top(count_title.alignment(Alignment::Right));
-
-    // Add search filter indicator
-    if !app.search_query.is_empty() {
-        let filter_title = Line::from(vec![Span::styled(
-            format!(
-                " \"{}\" ({} of {}) ",
-                app.search_query,
-                app.path_filtered_indices.len(),
-                app.path_blocks.len()
-            ),
-            Style::default().fg(Color::Yellow),
-        )]);
-        block = block.title_bottom(filter_title);
-    }
 
     let list = List::new(items)
         .block(block)
