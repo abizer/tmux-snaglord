@@ -1,5 +1,7 @@
 # Changelog
 
+<!-- skipped: v0.1.3 -->
+
 ## v0.1.2 (2025-12-20)
 
 - Added all-panes search mode to search across all visible panes in the current
