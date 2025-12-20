@@ -11,6 +11,99 @@ use regex::Regex;
 use clap::ValueEnum;
 
 use crate::action::Action;
+
+/// Generic wrapper for a filterable list with selection state
+pub struct StatefulList<T> {
+    /// All items in the list
+    pub items: Vec<T>,
+    /// Widget state for ratatui
+    pub state: ListState,
+    /// Indices of items matching current filter (into `items`)
+    pub filtered_indices: Vec<usize>,
+}
+
+impl<T> Default for StatefulList<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            state: ListState::default(),
+            filtered_indices: Vec::new(),
+        }
+    }
+}
+
+impl<T> StatefulList<T> {
+    /// Create a new list with items, selecting the first one
+    pub fn with_items(items: Vec<T>) -> Self {
+        let indices: Vec<usize> = (0..items.len()).collect();
+        let mut state = ListState::default();
+        if !items.is_empty() {
+            state.select(Some(0));
+        }
+        Self {
+            items,
+            state,
+            filtered_indices: indices,
+        }
+    }
+
+    /// Move selection to next item (wraps around)
+    pub fn next(&mut self) {
+        if self.filtered_indices.is_empty() {
+            return;
+        }
+        let i = self
+            .state
+            .selected()
+            .map_or(0, |i| (i + 1) % self.filtered_indices.len());
+        self.state.select(Some(i));
+    }
+
+    /// Move selection to previous item (wraps around)
+    pub fn previous(&mut self) {
+        if self.filtered_indices.is_empty() {
+            return;
+        }
+        let len = self.filtered_indices.len();
+        let i = self.state.selected().map_or(0, |i| (i + len - 1) % len);
+        self.state.select(Some(i));
+    }
+
+    /// Get the currently selected item
+    pub fn selected(&self) -> Option<&T> {
+        self.state
+            .selected()
+            .and_then(|i| self.filtered_indices.get(i))
+            .and_then(|&real_idx| self.items.get(real_idx))
+    }
+
+    /// Get the real index of the currently selected item
+    pub fn selected_index(&self) -> Option<usize> {
+        self.state
+            .selected()
+            .and_then(|i| self.filtered_indices.get(i).copied())
+    }
+
+    /// Reset filter to show all items
+    pub fn reset_filter(&mut self) {
+        self.filtered_indices = (0..self.items.len()).collect();
+        if !self.filtered_indices.is_empty() {
+            self.state.select(Some(0));
+        } else {
+            self.state.select(None);
+        }
+    }
+
+    /// Update filtered indices and reset selection
+    pub fn set_filtered(&mut self, indices: Vec<usize>) {
+        self.filtered_indices = indices;
+        if !self.filtered_indices.is_empty() {
+            self.state.select(Some(0));
+        } else {
+            self.state.select(None);
+        }
+    }
+}
 use crate::parser::{
     CommandBlock, JsonBlock, PathBlock, find_json_candidates, find_path_candidates, parse_history,
 };
@@ -53,31 +146,17 @@ pub struct App {
     /// Prompt pattern used for parsing (for diagnostics)
     pub prompt_pattern: String,
 
-    // Command state
-    /// Parsed command blocks
-    pub blocks: Vec<CommandBlock>,
-    /// State for the command list widget
-    pub list_state: ListState,
-    /// Indices of blocks that match the current filter
-    pub filtered_indices: Vec<usize>,
+    // Mode-specific lists (using StatefulList for unified state management)
+    /// Command blocks with selection state
+    pub commands: StatefulList<CommandBlock>,
     /// Indices of blocks selected for scratchpad (insertion order)
     pub selection: Vec<usize>,
 
-    // JSON state
-    /// Parsed JSON blocks
-    pub json_blocks: Vec<JsonBlock>,
-    /// State for the JSON list widget
-    pub json_list_state: ListState,
-    /// Indices of JSON blocks that match the current filter
-    pub json_filtered_indices: Vec<usize>,
+    /// JSON blocks with selection state
+    pub jsons: StatefulList<JsonBlock>,
 
-    // Paths state
-    /// Parsed path/URL blocks
-    pub path_blocks: Vec<PathBlock>,
-    /// State for the paths list widget
-    pub path_list_state: ListState,
-    /// Indices of path blocks that match the current filter
-    pub path_filtered_indices: Vec<usize>,
+    /// Path/URL blocks with selection state
+    pub paths: StatefulList<PathBlock>,
 
     // Search highlighting
     /// Maps block index -> byte indices of matched characters (for Commands mode)
@@ -119,16 +198,10 @@ impl App {
             mode: Mode::Commands,
             nerd_fonts,
             prompt_pattern,
-            blocks: Vec::new(),
-            list_state: ListState::default(),
-            filtered_indices: Vec::new(),
+            commands: StatefulList::default(),
             selection: Vec::new(),
-            json_blocks: Vec::new(),
-            json_list_state: ListState::default(),
-            json_filtered_indices: Vec::new(),
-            path_blocks: Vec::new(),
-            path_list_state: ListState::default(),
-            path_filtered_indices: Vec::new(),
+            jsons: StatefulList::default(),
+            paths: StatefulList::default(),
             match_indices: HashMap::new(),
             scroll_offset: 0,
             search_query: String::new(),
@@ -146,7 +219,7 @@ impl App {
 
     /// Load content based on current view_source
     pub fn load_content(&mut self) -> Result<()> {
-        self.blocks.clear();
+        self.commands.items.clear();
 
         match self.view_source {
             ViewSource::Original => {
@@ -179,35 +252,22 @@ impl App {
             block.pane_id = pane_id.to_string();
         }
 
-        self.blocks.append(&mut new_blocks);
+        self.commands.items.append(&mut new_blocks);
         Ok(())
     }
 
     /// Finalize state after loading blocks (indices, JSON, paths, etc.)
     fn finalize_ingestion(&mut self) {
-        self.list_state = ListState::default();
-        if !self.blocks.is_empty() {
-            self.list_state.select(Some(0));
-        }
-        self.filtered_indices = (0..self.blocks.len()).collect();
+        // Reset commands list state
+        self.commands.reset_filter();
         self.match_indices.clear();
         self.selection.clear();
 
         // Parse JSONs from command outputs
-        self.json_blocks = find_json_candidates(&self.blocks);
-        self.json_list_state = ListState::default();
-        if !self.json_blocks.is_empty() {
-            self.json_list_state.select(Some(0));
-        }
-        self.json_filtered_indices = (0..self.json_blocks.len()).collect();
+        self.jsons = StatefulList::with_items(find_json_candidates(&self.commands.items));
 
         // Parse paths/URLs from command outputs
-        self.path_blocks = find_path_candidates(&self.blocks);
-        self.path_list_state = ListState::default();
-        if !self.path_blocks.is_empty() {
-            self.path_list_state.select(Some(0));
-        }
-        self.path_filtered_indices = (0..self.path_blocks.len()).collect();
+        self.paths = StatefulList::with_items(find_path_candidates(&self.commands.items));
 
         // Reset view state
         self.scroll_offset = 0;
@@ -264,14 +324,14 @@ impl App {
                     }
                     Mode::Json => {
                         // In JSON mode, y copies the raw (minified) JSON
-                        if let Some(block) = self.get_selected_json_block() {
+                        if let Some(block) = self.jsons.selected() {
                             tmux::copy_to_clipboard(&block.raw)?;
                             return Ok(UpdateResult::Quit);
                         }
                     }
                     Mode::Paths => {
                         // In Paths mode, y copies the raw match (path with line:col if present)
-                        if let Some(block) = self.get_selected_path_block() {
+                        if let Some(block) = self.paths.selected() {
                             tmux::copy_to_clipboard(&block.raw)?;
                             return Ok(UpdateResult::Quit);
                         }
@@ -288,14 +348,14 @@ impl App {
                     }
                     Mode::Json => {
                         // In JSON mode, Y copies the pretty-printed JSON
-                        if let Some(block) = self.get_selected_json_block() {
+                        if let Some(block) = self.jsons.selected() {
                             tmux::copy_to_clipboard(&block.pretty)?;
                             return Ok(UpdateResult::Quit);
                         }
                     }
                     Mode::Paths => {
                         // In Paths mode, Y copies just the path (without line:col)
-                        if let Some(block) = self.get_selected_path_block() {
+                        if let Some(block) = self.paths.selected() {
                             tmux::copy_to_clipboard(&block.path)?;
                             return Ok(UpdateResult::Quit);
                         }
@@ -343,14 +403,14 @@ impl App {
                         }
                     }
                     Mode::Json => {
-                        if let Some(block) = self.get_selected_json_block() {
+                        if let Some(block) = self.jsons.selected() {
                             tmux::copy_to_clipboard(&block.pretty)?;
                             return Ok(UpdateResult::Quit);
                         }
                     }
                     Mode::Paths => {
                         // Submit copies the raw match (same as y)
-                        if let Some(block) = self.get_selected_path_block() {
+                        if let Some(block) = self.paths.selected() {
                             tmux::copy_to_clipboard(&block.raw)?;
                             return Ok(UpdateResult::Quit);
                         }
@@ -420,8 +480,8 @@ impl App {
                 // Always paste to original pane (where tool was launched), not the viewed pane
                 let payload = match self.mode {
                     Mode::Commands => self.get_output_payload(),
-                    Mode::Json => self.get_selected_json_block().map(|b| b.raw.clone()),
-                    Mode::Paths => self.get_selected_path_block().map(|b| b.raw.clone()),
+                    Mode::Json => self.jsons.selected().map(|b| b.raw.clone()),
+                    Mode::Paths => self.paths.selected().map(|b| b.raw.clone()),
                 };
 
                 if let Some(content) = payload {
@@ -434,8 +494,8 @@ impl App {
                 // Always paste to original pane (where tool was launched), not the viewed pane
                 let payload = match self.mode {
                     Mode::Commands => self.get_full_payload(),
-                    Mode::Json => self.get_selected_json_block().map(|b| b.pretty.clone()),
-                    Mode::Paths => self.get_selected_path_block().map(|b| b.path.clone()),
+                    Mode::Json => self.jsons.selected().map(|b| b.pretty.clone()),
+                    Mode::Paths => self.paths.selected().map(|b| b.path.clone()),
                 };
 
                 if let Some(content) = payload {
@@ -449,7 +509,7 @@ impl App {
 
     /// Toggle the selection state of the current item
     fn toggle_selection(&mut self) {
-        if let Some(idx) = self.get_current_data_index() {
+        if let Some(idx) = self.commands.selected_index() {
             if let Some(pos) = self.selection.iter().position(|&i| i == idx) {
                 self.selection.remove(pos);
             } else {
@@ -458,64 +518,12 @@ impl App {
         }
     }
 
-    /// Get the actual data index from the visual list selection
-    fn get_current_data_index(&self) -> Option<usize> {
-        self.list_state
-            .selected()
-            .and_then(|i| self.filtered_indices.get(i).copied())
-    }
-
     /// Move selection to the next item
     fn next(&mut self) {
         match self.mode {
-            Mode::Commands => {
-                if self.filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.list_state.selected() {
-                    Some(i) => {
-                        if i >= self.filtered_indices.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.list_state.select(Some(i));
-            }
-            Mode::Json => {
-                if self.json_filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.json_list_state.selected() {
-                    Some(i) => {
-                        if i >= self.json_filtered_indices.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.json_list_state.select(Some(i));
-            }
-            Mode::Paths => {
-                if self.path_filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.path_list_state.selected() {
-                    Some(i) => {
-                        if i >= self.path_filtered_indices.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.path_list_state.select(Some(i));
-            }
+            Mode::Commands => self.commands.next(),
+            Mode::Json => self.jsons.next(),
+            Mode::Paths => self.paths.next(),
         }
         self.scroll_offset = 0;
     }
@@ -523,54 +531,9 @@ impl App {
     /// Move selection to the previous item
     fn previous(&mut self) {
         match self.mode {
-            Mode::Commands => {
-                if self.filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.list_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.filtered_indices.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.list_state.select(Some(i));
-            }
-            Mode::Json => {
-                if self.json_filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.json_list_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.json_filtered_indices.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.json_list_state.select(Some(i));
-            }
-            Mode::Paths => {
-                if self.path_filtered_indices.is_empty() {
-                    return;
-                }
-                let i = match self.path_list_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.path_filtered_indices.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                self.path_list_state.select(Some(i));
-            }
+            Mode::Commands => self.commands.previous(),
+            Mode::Json => self.jsons.previous(),
+            Mode::Paths => self.paths.previous(),
         }
         self.scroll_offset = 0;
     }
@@ -595,11 +558,12 @@ impl App {
         match self.mode {
             Mode::Commands => {
                 if self.search_query.is_empty() {
-                    self.filtered_indices = (0..self.blocks.len()).collect();
+                    self.commands.reset_filter();
                 } else {
                     let matcher = SkimMatcherV2::default();
                     let mut matches: Vec<(i64, usize)> = self
-                        .blocks
+                        .commands
+                        .items
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, block)| {
@@ -628,22 +592,18 @@ impl App {
                         .collect();
 
                     matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    self.filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                }
-
-                if !self.filtered_indices.is_empty() {
-                    self.list_state.select(Some(0));
-                } else {
-                    self.list_state.select(None);
+                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                    self.commands.set_filtered(indices);
                 }
             }
             Mode::Json => {
                 if self.search_query.is_empty() {
-                    self.json_filtered_indices = (0..self.json_blocks.len()).collect();
+                    self.jsons.reset_filter();
                 } else {
                     let matcher = SkimMatcherV2::default();
                     let mut matches: Vec<(i64, usize)> = self
-                        .json_blocks
+                        .jsons
+                        .items
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, block)| {
@@ -660,22 +620,18 @@ impl App {
                         .collect();
 
                     matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    self.json_filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                }
-
-                if !self.json_filtered_indices.is_empty() {
-                    self.json_list_state.select(Some(0));
-                } else {
-                    self.json_list_state.select(None);
+                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                    self.jsons.set_filtered(indices);
                 }
             }
             Mode::Paths => {
                 if self.search_query.is_empty() {
-                    self.path_filtered_indices = (0..self.path_blocks.len()).collect();
+                    self.paths.reset_filter();
                 } else {
                     let matcher = SkimMatcherV2::default();
                     let mut matches: Vec<(i64, usize)> = self
-                        .path_blocks
+                        .paths
+                        .items
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, block)| {
@@ -692,13 +648,8 @@ impl App {
                         .collect();
 
                     matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    self.path_filtered_indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                }
-
-                if !self.path_filtered_indices.is_empty() {
-                    self.path_list_state.select(Some(0));
-                } else {
-                    self.path_list_state.select(None);
+                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
+                    self.paths.set_filtered(indices);
                 }
             }
         }
@@ -723,7 +674,7 @@ impl App {
             let combined: Vec<String> = self
                 .selection
                 .iter()
-                .filter_map(|&i| self.blocks.get(i))
+                .filter_map(|&i| self.commands.items.get(i))
                 .map(&extractor)
                 .collect();
             if combined.is_empty() {
@@ -733,9 +684,7 @@ impl App {
             }
         } else {
             // Single mode: get current item
-            self.get_current_data_index()
-                .and_then(|i| self.blocks.get(i))
-                .map(extractor)
+            self.commands.selected().map(extractor)
         }
     }
 
@@ -756,49 +705,25 @@ impl App {
 
     /// Get debug-formatted output for diagnosing parsing issues
     fn get_selected_debug(&self) -> Option<String> {
-        self.get_current_data_index()
-            .and_then(|i| self.blocks.get(i))
-            .map(|b| {
-                let mut out = String::new();
-                out.push_str("=== COMMAND (raw) ===\n");
-                for (i, line) in b.command.lines().enumerate() {
+        self.commands.selected().map(|b| {
+            let mut out = String::new();
+            out.push_str("=== COMMAND (raw) ===\n");
+            for (i, line) in b.command.lines().enumerate() {
+                out.push_str(&format!("{:3}| {}\n", i + 1, escape_debug(line)));
+            }
+            out.push_str("\n=== COMMAND (clean) ===\n");
+            for (i, line) in b.clean_command.lines().enumerate() {
+                out.push_str(&format!("{:3}| {}\n", i + 1, line));
+            }
+            out.push_str("\n=== OUTPUT (raw) ===\n");
+            if b.output.is_empty() {
+                out.push_str("(empty)\n");
+            } else {
+                for (i, line) in b.output.lines().enumerate() {
                     out.push_str(&format!("{:3}| {}\n", i + 1, escape_debug(line)));
                 }
-                out.push_str("\n=== COMMAND (clean) ===\n");
-                for (i, line) in b.clean_command.lines().enumerate() {
-                    out.push_str(&format!("{:3}| {}\n", i + 1, line));
-                }
-                out.push_str("\n=== OUTPUT (raw) ===\n");
-                if b.output.is_empty() {
-                    out.push_str("(empty)\n");
-                } else {
-                    for (i, line) in b.output.lines().enumerate() {
-                        out.push_str(&format!("{:3}| {}\n", i + 1, escape_debug(line)));
-                    }
-                }
-                out
-            })
-    }
-
-    /// Get the currently selected block for display
-    pub fn get_selected_block(&self) -> Option<&CommandBlock> {
-        self.get_current_data_index()
-            .and_then(|i| self.blocks.get(i))
-    }
-
-    /// Get the currently selected JSON block for display
-    pub fn get_selected_json_block(&self) -> Option<&JsonBlock> {
-        self.json_list_state
-            .selected()
-            .and_then(|i| self.json_filtered_indices.get(i).copied())
-            .and_then(|real_idx| self.json_blocks.get(real_idx))
-    }
-
-    /// Get the currently selected path block for display
-    pub fn get_selected_path_block(&self) -> Option<&PathBlock> {
-        self.path_list_state
-            .selected()
-            .and_then(|i| self.path_filtered_indices.get(i).copied())
-            .and_then(|real_idx| self.path_blocks.get(real_idx))
+            }
+            out
+        })
     }
 }

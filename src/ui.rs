@@ -98,7 +98,7 @@ fn highlight_text(
         }
 
         // Binary search is O(log n), faster than HashSet build O(n) in render loop
-        let is_match = matches.map_or(false, |m| m.binary_search(&byte_idx).is_ok());
+        let is_match = matches.is_some_and(|m| m.binary_search(&byte_idx).is_ok());
 
         // State change: flush buffer
         if is_match != pending_is_highlight {
@@ -227,16 +227,17 @@ fn render_list_pane(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
 
 /// Render the command list in the left pane
 fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let selected_idx = app.list_state.selected();
+    let selected_idx = app.commands.state.selected();
     // Available width: area - border (1) - highlight symbol (2) - number (3) - marker (2)
     let max_width = area.width.saturating_sub(8) as usize;
 
     let items: Vec<ListItem> = app
+        .commands
         .filtered_indices
         .iter()
         .enumerate()
         .map(|(visual_idx, &real_idx)| {
-            let block = &app.blocks[real_idx];
+            let block = &app.commands.items[real_idx];
             let is_focused = selected_idx == Some(visual_idx);
             let is_pinned = app.selection.contains(&real_idx);
             // Retrieve match indices for this block (if any)
@@ -263,7 +264,7 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         )])
     } else if let Some(idx) = selected_idx {
         Line::from(vec![Span::styled(
-            format!(" ({}/{}) ", idx + 1, app.filtered_indices.len()),
+            format!(" ({}/{}) ", idx + 1, app.commands.filtered_indices.len()),
             Style::default().fg(Color::DarkGray),
         )])
     } else {
@@ -286,21 +287,22 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         )
         .highlight_symbol("▶ ");
 
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, area, &mut app.commands.state);
 }
 
 /// Render the JSON list in the left pane
 fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let selected_idx = app.json_list_state.selected();
+    let selected_idx = app.jsons.state.selected();
     // Available width: area - border (1) - highlight symbol (2) - number (4)
     let max_width = area.width.saturating_sub(7) as usize;
 
     let items: Vec<ListItem> = app
-        .json_filtered_indices
+        .jsons
+        .filtered_indices
         .iter()
         .enumerate()
         .map(|(visual_idx, &real_idx)| {
-            let block = &app.json_blocks[real_idx];
+            let block = &app.jsons.items[real_idx];
             let is_focused = selected_idx == Some(visual_idx);
             format_json_list_item(visual_idx, &block.name, is_focused, max_width)
         })
@@ -312,7 +314,7 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
     // Count info
     let count_title = if let Some(idx) = selected_idx {
         Line::from(vec![Span::styled(
-            format!(" ({}/{}) ", idx + 1, app.json_filtered_indices.len()),
+            format!(" ({}/{}) ", idx + 1, app.jsons.filtered_indices.len()),
             Style::default().fg(Color::DarkGray),
         )])
     } else {
@@ -334,7 +336,7 @@ fn render_json_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rec
         )
         .highlight_symbol("▶ ");
 
-    frame.render_stateful_widget(list, area, &mut app.json_list_state);
+    frame.render_stateful_widget(list, area, &mut app.jsons.state);
 }
 
 /// Format a JSON list item
@@ -363,17 +365,18 @@ fn format_json_list_item(
 
 /// Render the paths/URLs list in the left pane
 fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let selected_idx = app.path_list_state.selected();
+    let selected_idx = app.paths.state.selected();
     // Available width: area - border (1) - highlight symbol (2) - number (4) - icon (2)
     let max_width = area.width.saturating_sub(9) as usize;
 
     let use_nerd_fonts = app.nerd_fonts;
     let items: Vec<ListItem> = app
-        .path_filtered_indices
+        .paths
+        .filtered_indices
         .iter()
         .enumerate()
         .map(|(visual_idx, &real_idx)| {
-            let block = &app.path_blocks[real_idx];
+            let block = &app.paths.items[real_idx];
             let is_focused = selected_idx == Some(visual_idx);
             format_path_list_item(visual_idx, block, is_focused, max_width, use_nerd_fonts)
         })
@@ -385,7 +388,7 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
     // Count info
     let count_title = if let Some(idx) = selected_idx {
         Line::from(vec![Span::styled(
-            format!(" ({}/{}) ", idx + 1, app.path_filtered_indices.len()),
+            format!(" ({}/{}) ", idx + 1, app.paths.filtered_indices.len()),
             Style::default().fg(Color::DarkGray),
         )])
     } else {
@@ -407,7 +410,7 @@ fn render_paths_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Re
         )
         .highlight_symbol("▶ ");
 
-    frame.render_stateful_widget(list, area, &mut app.path_list_state);
+    frame.render_stateful_widget(list, area, &mut app.paths.state);
 }
 
 /// Format a path list item with type indicator
@@ -460,13 +463,13 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
         Mode::Commands => {
             // Convert ANSI escape codes to ratatui styled Text
             // Show command + output together
-            if let Some(block) = app.get_selected_block() {
+            if let Some(block) = app.commands.selected() {
                 let full = format!("{}\n{}", block.command, block.output);
                 let bytes = full.into_bytes();
                 bytes
                     .into_text()
                     .unwrap_or_else(|_| "Error rendering".into())
-            } else if app.blocks.is_empty() {
+            } else if app.commands.items.is_empty() {
                 // No commands found - show diagnostic info
                 Text::from(vec![
                     Line::from(Span::styled(
@@ -487,29 +490,29 @@ fn render_output_pane(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
                         Style::default().fg(Color::DarkGray),
                     )),
                 ])
-            } else if app.filtered_indices.is_empty() && !app.search_query.is_empty() {
+            } else if app.commands.filtered_indices.is_empty() && !app.search_query.is_empty() {
                 "No matching commands".into()
             } else {
                 "Select a command with j/k...".into()
             }
         }
         Mode::Json => {
-            if let Some(block) = app.get_selected_json_block() {
+            if let Some(block) = app.jsons.selected() {
                 json_to_text(&block.value, 2)
-            } else if app.json_blocks.is_empty() {
+            } else if app.jsons.items.is_empty() {
                 "No JSON objects found in history.".into()
-            } else if app.json_filtered_indices.is_empty() && !app.search_query.is_empty() {
+            } else if app.jsons.filtered_indices.is_empty() && !app.search_query.is_empty() {
                 "No matching JSON objects".into()
             } else {
                 "Select a JSON object with j/k...".into()
             }
         }
         Mode::Paths => {
-            if let Some(block) = app.get_selected_path_block() {
+            if let Some(block) = app.paths.selected() {
                 path_to_text(block)
-            } else if app.path_blocks.is_empty() {
+            } else if app.paths.items.is_empty() {
                 "No paths or URLs found in history.".into()
-            } else if app.path_filtered_indices.is_empty() && !app.search_query.is_empty() {
+            } else if app.paths.filtered_indices.is_empty() && !app.search_query.is_empty() {
                 "No matching paths".into()
             } else {
                 "Select a path with j/k...".into()
