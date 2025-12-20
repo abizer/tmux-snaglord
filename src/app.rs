@@ -11,6 +11,62 @@ use regex::Regex;
 use clap::ValueEnum;
 
 use crate::action::Action;
+use crate::parser::{
+    CommandBlock, JsonBlock, PathBlock, find_json_candidates, find_path_candidates, parse_history,
+};
+use crate::tmux;
+use crate::utils::{escape_debug, strip_ansi};
+
+/// Trait for items that can be fuzzy searched
+pub trait FuzzySearchable {
+    /// Returns (score, optional match indices) if the item matches the query
+    fn fuzzy_match(&self, query: &str, matcher: &SkimMatcherV2) -> Option<(i64, Option<Vec<usize>>)>;
+}
+
+impl FuzzySearchable for CommandBlock {
+    fn fuzzy_match(&self, query: &str, matcher: &SkimMatcherV2) -> Option<(i64, Option<Vec<usize>>)> {
+        let cmd_result = matcher.fuzzy_indices(&self.clean_command, query);
+        let clean_output = strip_ansi(&self.output);
+        let out_score = matcher.fuzzy_match(&clean_output, query);
+
+        match (cmd_result, out_score) {
+            (Some((c_score, indices)), Some(o_score)) => {
+                Some((c_score.max(o_score), Some(indices)))
+            }
+            (Some((c_score, indices)), None) => Some((c_score, Some(indices))),
+            (None, Some(o_score)) => Some((o_score, None)),
+            (None, None) => None,
+        }
+    }
+}
+
+impl FuzzySearchable for JsonBlock {
+    fn fuzzy_match(&self, query: &str, matcher: &SkimMatcherV2) -> Option<(i64, Option<Vec<usize>>)> {
+        let name_score = matcher.fuzzy_match(&self.name, query);
+        let raw_score = matcher.fuzzy_match(&self.raw, query);
+
+        match (name_score, raw_score) {
+            (Some(n), Some(r)) => Some((n.max(r), None)),
+            (Some(n), None) => Some((n, None)),
+            (None, Some(r)) => Some((r, None)),
+            (None, None) => None,
+        }
+    }
+}
+
+impl FuzzySearchable for PathBlock {
+    fn fuzzy_match(&self, query: &str, matcher: &SkimMatcherV2) -> Option<(i64, Option<Vec<usize>>)> {
+        let path_score = matcher.fuzzy_match(&self.path, query);
+        let raw_score = matcher.fuzzy_match(&self.raw, query);
+
+        match (path_score, raw_score) {
+            (Some(p), Some(r)) => Some((p.max(r), None)),
+            (Some(p), None) => Some((p, None)),
+            (None, Some(r)) => Some((r, None)),
+            (None, None) => None,
+        }
+    }
+}
 
 /// Generic wrapper for a filterable list with selection state
 pub struct StatefulList<T> {
@@ -104,11 +160,34 @@ impl<T> StatefulList<T> {
         }
     }
 }
-use crate::parser::{
-    CommandBlock, JsonBlock, PathBlock, find_json_candidates, find_path_candidates, parse_history,
-};
-use crate::tmux;
-use crate::utils::{escape_debug, strip_ansi};
+
+impl<T: FuzzySearchable> StatefulList<T> {
+    /// Filter items by fuzzy query, returning a map of index -> match indices
+    pub fn filter_by_query(&mut self, query: &str) -> HashMap<usize, Vec<usize>> {
+        let matcher = SkimMatcherV2::default();
+        let mut match_indices = HashMap::new();
+
+        let mut matches: Vec<(i64, usize)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                item.fuzzy_match(query, &matcher).map(|(score, indices)| {
+                    if let Some(indices) = indices {
+                        match_indices.insert(idx, indices);
+                    }
+                    (score, idx)
+                })
+            })
+            .collect();
+
+        matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let indices = matches.into_iter().map(|(_, idx)| idx).collect();
+        self.set_filtered(indices);
+
+        match_indices
+    }
+}
 
 /// Application mode (Commands, JSON, or Paths view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -498,104 +577,24 @@ impl App {
 
     /// Update filtered results based on current search query
     fn update_search_results(&mut self) {
-        // Clear previous match indices
         self.match_indices.clear();
 
-        match self.mode {
-            Mode::Commands => {
-                if self.search_query.is_empty() {
-                    self.commands.reset_filter();
-                } else {
-                    let matcher = SkimMatcherV2::default();
-                    let mut matches: Vec<(i64, usize)> = self
-                        .commands
-                        .items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, block)| {
-                            // Use fuzzy_indices to get both score and match positions
-                            let cmd_result =
-                                matcher.fuzzy_indices(&block.clean_command, &self.search_query);
-                            let clean_output = strip_ansi(&block.output);
-                            let out_score = matcher.fuzzy_match(&clean_output, &self.search_query);
-
-                            match (cmd_result, out_score) {
-                                (Some((c_score, c_indices)), Some(o_score)) => {
-                                    self.match_indices.insert(idx, c_indices);
-                                    Some((c_score.max(o_score), idx))
-                                }
-                                (Some((c_score, c_indices)), None) => {
-                                    self.match_indices.insert(idx, c_indices);
-                                    Some((c_score, idx))
-                                }
-                                (None, Some(o_score)) => {
-                                    // Output matched but not command - no highlighting
-                                    Some((o_score, idx))
-                                }
-                                (None, None) => None,
-                            }
-                        })
-                        .collect();
-
-                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                    self.commands.set_filtered(indices);
-                }
+        if self.search_query.is_empty() {
+            match self.mode {
+                Mode::Commands => self.commands.reset_filter(),
+                Mode::Json => self.jsons.reset_filter(),
+                Mode::Paths => self.paths.reset_filter(),
             }
-            Mode::Json => {
-                if self.search_query.is_empty() {
-                    self.jsons.reset_filter();
-                } else {
-                    let matcher = SkimMatcherV2::default();
-                    let mut matches: Vec<(i64, usize)> = self
-                        .jsons
-                        .items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, block)| {
-                            // Search in both name and raw JSON content
-                            let name_score = matcher.fuzzy_match(&block.name, &self.search_query);
-                            let raw_score = matcher.fuzzy_match(&block.raw, &self.search_query);
-                            match (name_score, raw_score) {
-                                (Some(n), Some(r)) => Some((n.max(r), idx)),
-                                (Some(n), None) => Some((n, idx)),
-                                (None, Some(r)) => Some((r, idx)),
-                                (None, None) => None,
-                            }
-                        })
-                        .collect();
-
-                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                    self.jsons.set_filtered(indices);
+        } else {
+            match self.mode {
+                Mode::Commands => {
+                    self.match_indices = self.commands.filter_by_query(&self.search_query);
                 }
-            }
-            Mode::Paths => {
-                if self.search_query.is_empty() {
-                    self.paths.reset_filter();
-                } else {
-                    let matcher = SkimMatcherV2::default();
-                    let mut matches: Vec<(i64, usize)> = self
-                        .paths
-                        .items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, block)| {
-                            // Search in path and raw string
-                            let path_score = matcher.fuzzy_match(&block.path, &self.search_query);
-                            let raw_score = matcher.fuzzy_match(&block.raw, &self.search_query);
-                            match (path_score, raw_score) {
-                                (Some(p), Some(r)) => Some((p.max(r), idx)),
-                                (Some(p), None) => Some((p, idx)),
-                                (None, Some(r)) => Some((r, idx)),
-                                (None, None) => None,
-                            }
-                        })
-                        .collect();
-
-                    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                    let indices = matches.into_iter().map(|(_, idx)| idx).collect();
-                    self.paths.set_filtered(indices);
+                Mode::Json => {
+                    self.jsons.filter_by_query(&self.search_query);
+                }
+                Mode::Paths => {
+                    self.paths.filter_by_query(&self.search_query);
                 }
             }
         }
