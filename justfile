@@ -13,15 +13,15 @@ check: format clippy-fix build test clippy
 
 # Format Rust files
 format:
-    cargo fmt --all
+    @cargo fmt --all
 
 # Run clippy and fail on any warnings
 clippy:
-    cargo clippy -- -D clippy::all
+    @cargo clippy --quiet -- -D clippy::all 2>&1 | { grep -v "^0 errors" || true; }
 
 # Auto-fix clippy warnings
 clippy-fix:
-    cargo clippy --fix --allow-dirty -- -W clippy::all
+    @cargo clippy --fix --allow-dirty --quiet -- -W clippy::all 2>&1 | { grep -v "^0 errors" || true; }
 
 # Build the project
 build:
@@ -29,7 +29,10 @@ build:
 
 # Run tests
 test:
-    cargo test
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output=$(cargo test --quiet 2>&1) || { echo "$output"; exit 1; }
+    echo "$output" | tail -1
 
 # Run the application
 run *ARGS:
