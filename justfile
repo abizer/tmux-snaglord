@@ -9,19 +9,15 @@ default:
 
 # Run all checks
 [parallel]
-check: format clippy-fix build test clippy
+check: format clippy build test
 
 # Format Rust files
 format:
     @cargo fmt --all
 
-# Run clippy and fail on any warnings
+# Auto-fix clippy warnings, then fail on any remaining
 clippy:
-    @cargo clippy --quiet -- -D clippy::all 2>&1 | { grep -v "^0 errors" || true; }
-
-# Auto-fix clippy warnings
-clippy-fix:
-    @cargo clippy --fix --allow-dirty --quiet -- -W clippy::all 2>&1 | { grep -v "^0 errors" || true; }
+    @cargo clippy --fix --allow-dirty --quiet -- -D clippy::all 2>&1 | { grep -v "^0 errors" || true; }
 
 # Build the project
 build:
