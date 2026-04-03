@@ -33,7 +33,7 @@ impl FuzzySearchable for CommandBlock {
         query: &str,
         matcher: &SkimMatcherV2,
     ) -> Option<(i64, Option<Vec<usize>>)> {
-        let cmd_result = matcher.fuzzy_indices(&self.clean_command, query);
+        let cmd_result = matcher.fuzzy_indices(&self.command_text, query);
         let clean_output = strip_ansi(&self.output);
         let out_score = matcher.fuzzy_match(&clean_output, query);
 
