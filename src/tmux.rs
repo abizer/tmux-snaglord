@@ -6,25 +6,30 @@ use std::process::Command;
 /// Special target identifier for the previous (last active) pane
 const PREVIOUS_PANE_TARGET: &str = "previous";
 
+/// Run a tmux command and return its stdout as a String
+fn run_tmux(args: &[&str]) -> Result<String> {
+    let output = Command::new("tmux").args(args).output().context(format!(
+        "Failed to execute tmux {}",
+        args.first().unwrap_or(&"")
+    ))?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux {} failed: {}",
+            args.first().unwrap_or(&""),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    String::from_utf8(output.stdout).context("tmux output contained invalid UTF-8")
+}
+
 /// Get the pane ID of the previous (last active) pane in the current window.
 ///
 /// Uses tmux's `pane_last` format variable to find the pane that was active
 /// before the current one.
 fn get_previous_pane_id() -> Result<String> {
-    let output = Command::new("tmux")
-        .args(["list-panes", "-f", "#{pane_last}", "-F", "#{pane_id}"])
-        .output()
-        .context("Failed to execute tmux list-panes")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux list-panes failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let pane_id = String::from_utf8(output.stdout)
-        .context("tmux output contained invalid UTF-8")?
+    let pane_id = run_tmux(&["list-panes", "-f", "#{pane_last}", "-F", "#{pane_id}"])?
         .trim()
         .to_string();
 
@@ -47,18 +52,9 @@ pub fn resolve_pane_id(target: Option<&str>) -> Result<String> {
     match target {
         Some(PREVIOUS_PANE_TARGET) => get_previous_pane_id(),
         Some(id) => Ok(id.to_string()),
-        None => {
-            // Default to current pane if none specified
-            let output = Command::new("tmux")
-                .args(["display-message", "-p", "#{pane_id}"])
-                .output()
-                .context("Failed to get current pane ID")?;
-
-            Ok(String::from_utf8(output.stdout)
-                .context("Invalid UTF-8 in pane ID")?
-                .trim()
-                .to_string())
-        }
+        None => Ok(run_tmux(&["display-message", "-p", "#{pane_id}"])?
+            .trim()
+            .to_string()),
     }
 }
 
@@ -73,7 +69,7 @@ pub fn resolve_pane_id(target: Option<&str>) -> Result<String> {
 ///
 /// The `pane_id` should be a resolved pane ID (e.g., "%0") from `resolve_pane_id`.
 pub fn capture_pane(pane_id: &str) -> Result<String> {
-    let args = vec![
+    run_tmux(&[
         "capture-pane",
         "-e",
         "-J",
@@ -84,21 +80,7 @@ pub fn capture_pane(pane_id: &str) -> Result<String> {
         "-",
         "-t",
         pane_id,
-    ];
-
-    let output = Command::new("tmux")
-        .args(&args)
-        .output()
-        .context("Failed to execute tmux capture-pane. Are you running inside tmux?")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux capture-pane failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    String::from_utf8(output.stdout).context("tmux output contained invalid UTF-8")
+    ])
 }
 
 /// Send content to a target pane as literal keys
@@ -106,17 +88,7 @@ pub fn capture_pane(pane_id: &str) -> Result<String> {
 /// Uses `tmux send-keys` with `-l` flag to send text literally without interpreting
 /// special characters as key names.
 pub fn send_keys(pane_id: &str, content: &str) -> Result<()> {
-    let output = Command::new("tmux")
-        .args(["send-keys", "-t", pane_id, "-l", content])
-        .output()
-        .context("Failed to execute tmux send-keys")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux send-keys failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_tmux(&["send-keys", "-t", pane_id, "-l", content])?;
     Ok(())
 }
 
@@ -124,19 +96,7 @@ pub fn send_keys(pane_id: &str, content: &str) -> Result<()> {
 ///
 /// Returns a vector of pane IDs (e.g., ["%0", "%1", "%2"])
 pub fn list_panes() -> Result<Vec<String>> {
-    let output = Command::new("tmux")
-        .args(["list-panes", "-F", "#{pane_id}"])
-        .output()
-        .context("Failed to execute tmux list-panes")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux list-panes failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let out = String::from_utf8(output.stdout).context("tmux output contained invalid UTF-8")?;
+    let out = run_tmux(&["list-panes", "-F", "#{pane_id}"])?;
     Ok(out
         .lines()
         .filter(|s| !s.is_empty())
