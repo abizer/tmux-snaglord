@@ -1,6 +1,6 @@
 [package]
 name = "tmux-snaglord"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = [""]
 description = "A TUI application to make copying terminal history from tmux easier"

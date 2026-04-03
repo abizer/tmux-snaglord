@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.5 (2026-04-03)
+
+- Add help overlay showing keybindings, triggered by `?` key
+- Restyle bottom bar to a compact single-line footer
+- Strip shell prompt from command list, showing just the command itself
+- Fix fuzzy search matching against prompt/directory path instead of the command
+
 ## v0.1.4 (2025-12-27)
 
 - Now captures full scrollback history instead of only the last 5000 lines
