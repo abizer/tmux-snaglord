@@ -47,21 +47,20 @@ impl FuzzySearchable for CommandBlock {
     }
 }
 
+fn best_score(a: Option<i64>, b: Option<i64>) -> Option<(i64, Option<Vec<usize>>)> {
+    a.into_iter().chain(b).max().map(|s| (s, None))
+}
+
 impl FuzzySearchable for JsonBlock {
     fn fuzzy_match(
         &self,
         query: &str,
         matcher: &SkimMatcherV2,
     ) -> Option<(i64, Option<Vec<usize>>)> {
-        let name_score = matcher.fuzzy_match(&self.name, query);
-        let raw_score = matcher.fuzzy_match(&self.raw, query);
-
-        match (name_score, raw_score) {
-            (Some(n), Some(r)) => Some((n.max(r), None)),
-            (Some(n), None) => Some((n, None)),
-            (None, Some(r)) => Some((r, None)),
-            (None, None) => None,
-        }
+        best_score(
+            matcher.fuzzy_match(&self.name, query),
+            matcher.fuzzy_match(&self.raw, query),
+        )
     }
 }
 
@@ -71,15 +70,10 @@ impl FuzzySearchable for PathBlock {
         query: &str,
         matcher: &SkimMatcherV2,
     ) -> Option<(i64, Option<Vec<usize>>)> {
-        let path_score = matcher.fuzzy_match(&self.path, query);
-        let raw_score = matcher.fuzzy_match(&self.raw, query);
-
-        match (path_score, raw_score) {
-            (Some(p), Some(r)) => Some((p.max(r), None)),
-            (Some(p), None) => Some((p, None)),
-            (None, Some(r)) => Some((r, None)),
-            (None, None) => None,
-        }
+        best_score(
+            matcher.fuzzy_match(&self.path, query),
+            matcher.fuzzy_match(&self.raw, query),
+        )
     }
 }
 
