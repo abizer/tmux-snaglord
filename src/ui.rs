@@ -8,6 +8,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
 
@@ -238,10 +239,10 @@ fn build_mode_tabs(
 
 /// Render the application UI
 pub fn render(frame: &mut Frame, app: &mut App) {
-    // Split into main area and footer (2 lines for border + text)
+    // Split into main area and footer (1 line, no border)
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
     // Split main area into left (30%) and right (70%) panes
@@ -512,144 +513,113 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_error_bar(frame: &mut Frame, error: &str, area: ratatui::layout::Rect) {
     let error_text = Line::from(vec![
         Span::styled(
-            " ✗ ",
+            "  ✗ ",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
         Span::styled(error, Style::default().fg(Color::Red)),
     ]);
 
-    let paragraph = Paragraph::new(error_text).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::Red)),
-    );
-
+    let paragraph = Paragraph::new(error_text);
     frame.render_widget(paragraph, area);
 }
 
 /// Render the search bar
 fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let search_text = Line::from(vec![
-        Span::styled(" / ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "  / ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(&app.search_query, Style::default().fg(Color::White)),
         Span::styled("▏", Style::default().fg(Color::Yellow)), // Cursor
     ]);
 
-    let paragraph = Paragraph::new(search_text).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::Yellow)),
-    );
-
+    let paragraph = Paragraph::new(search_text);
     frame.render_widget(paragraph, area);
+}
+
+/// Build a help bar line from key-label pairs with pipe separators
+fn build_help_line(items: &[(&str, &str)]) -> Line<'static> {
+    let key_style = Style::default().fg(Color::Green);
+    let label_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let sep_style = Style::default().fg(Color::DarkGray);
+
+    let mut spans = vec![Span::raw("  ")]; // left padding
+
+    for (i, (key, label)) in items.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" | ", sep_style));
+        }
+        spans.push(Span::styled(format!("{} ", key), key_style));
+        spans.push(Span::styled(label.to_string(), label_style));
+    }
+
+    Line::from(spans)
 }
 
 /// Render the help bar
 fn render_help_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let key_style = Style::default().fg(Color::Green);
-    let desc_style = Style::default().fg(Color::White);
-    let sep_style = Style::default().fg(Color::DarkGray);
-
     let help = match app.mode {
-        Mode::Commands => Line::from(vec![
-            Span::styled("1-3 ", key_style),
-            Span::styled("mode", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("; ", key_style),
-            Span::styled("prev pane", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("/ ", key_style),
-            Span::styled("search", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("j/k ", key_style),
-            Span::styled("nav", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("spc ", key_style),
-            Span::styled("pin", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("Y ", key_style),
-            Span::styled("cmd+out", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("y ", key_style),
-            Span::styled("out", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("c ", key_style),
-            Span::styled("cmd", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("P ", key_style),
-            Span::styled("paste cmd+out", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("p ", key_style),
-            Span::styled("paste out", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("q ", key_style),
-            Span::styled("quit", desc_style),
+        Mode::Commands => build_help_line(&[
+            ("1-3", "mode"),
+            (";", "prev pane"),
+            ("/", "search"),
+            ("j/k", "nav"),
+            ("spc", "pin"),
+            ("Y", "cmd+out"),
+            ("y", "out"),
+            ("c", "cmd"),
+            ("P", "paste cmd+out"),
+            ("p", "paste out"),
+            ("q", "quit"),
         ]),
-        Mode::Json => Line::from(vec![
-            Span::styled("1-3 ", key_style),
-            Span::styled("mode", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("; ", key_style),
-            Span::styled("prev pane", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("/ ", key_style),
-            Span::styled("search", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("j/k ", key_style),
-            Span::styled("nav", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("y ", key_style),
-            Span::styled("raw", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("Y ", key_style),
-            Span::styled("pretty", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("P ", key_style),
-            Span::styled("paste pretty", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("p ", key_style),
-            Span::styled("paste raw", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("q ", key_style),
-            Span::styled("quit", desc_style),
+        Mode::Json => build_help_line(&[
+            ("1-3", "mode"),
+            (";", "prev pane"),
+            ("/", "search"),
+            ("j/k", "nav"),
+            ("y", "raw"),
+            ("Y", "pretty"),
+            ("P", "paste pretty"),
+            ("p", "paste raw"),
+            ("q", "quit"),
         ]),
-        Mode::Paths => Line::from(vec![
-            Span::styled("1-3 ", key_style),
-            Span::styled("mode", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("; ", key_style),
-            Span::styled("prev pane", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("/ ", key_style),
-            Span::styled("search", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("j/k ", key_style),
-            Span::styled("nav", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("y ", key_style),
-            Span::styled("full", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("Y ", key_style),
-            Span::styled("path", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("P ", key_style),
-            Span::styled("paste path", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("p ", key_style),
-            Span::styled("paste full", desc_style),
-            Span::styled("  ·  ", sep_style),
-            Span::styled("q ", key_style),
-            Span::styled("quit", desc_style),
+        Mode::Paths => build_help_line(&[
+            ("1-3", "mode"),
+            (";", "prev pane"),
+            ("/", "search"),
+            ("j/k", "nav"),
+            ("y", "full"),
+            ("Y", "path"),
+            ("P", "paste path"),
+            ("p", "paste full"),
+            ("q", "quit"),
         ]),
     };
 
-    let paragraph = Paragraph::new(help).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
+    // Split into main help (fill) and right-aligned "? Help"
+    let footer_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Fill(1), Constraint::Length(7)])
+        .split(area);
 
-    frame.render_widget(paragraph, area);
+    let help_paragraph = Paragraph::new(help);
+    frame.render_widget(help_paragraph, footer_layout[0]);
+
+    let help_key = Paragraph::new(Line::from(vec![
+        Span::styled("? ", Style::default().fg(Color::Green)),
+        Span::styled(
+            "Help",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    frame.render_widget(help_key, footer_layout[1]);
 }
 
 /// Format a single list item with consistent styling and optional match highlighting
