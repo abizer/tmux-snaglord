@@ -42,6 +42,12 @@ selectable block.
 
 ## Install
 
+### Quick install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/raine/tmux-snaglord/main/scripts/install.sh | bash
+```
+
 ### Homebrew (macOS/Linux)
 
 ```sh
