@@ -282,7 +282,7 @@ fn render_command_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
             let matches = app.match_indices.get(&real_idx);
             format_list_item(
                 visual_idx,
-                &block.clean_command,
+                &block.command_text,
                 is_focused,
                 is_pinned,
                 max_width,
