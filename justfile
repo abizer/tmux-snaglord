@@ -30,6 +30,10 @@ test:
     output=$(cargo test --quiet 2>&1) || { echo "$output"; exit 1; }
     echo "$output" | tail -1
 
+# Install debug binary globally via symlink
+install-dev:
+    cargo build && ln -sf $(pwd)/target/debug/tmux-snaglord ~/.cargo/bin/tmux-snaglord
+
 # Run the application
 run *ARGS:
     cargo run -- "$@"
