@@ -211,28 +211,30 @@ fn build_mode_tabs(
                 spans.push(Span::styled("]", Style::default().fg(*color)));
             }
         } else {
-            // Inactive tab: gray text with spacing to align
+            // Inactive tab: gray text, padded to match active tab width
             spans.push(Span::raw(" "));
             spans.push(Span::styled(*label, Style::default().fg(Color::DarkGray)));
             spans.push(Span::raw(" "));
         }
     }
 
-    // Add view source indicator
-    let (source_label, source_color) = match view_source {
-        ViewSource::Original => ("THIS", Color::Green),
-        ViewSource::Previous => ("PREV", Color::Yellow),
-        ViewSource::All => ("ALL", Color::Cyan),
-    };
-    spans.push(Span::raw(" "));
-    // Simple tag style: muted bg with colored text
-    spans.push(Span::styled(
-        format!(" {} ", source_label),
-        Style::default()
-            .fg(source_color)
-            .bg(Color::Rgb(50, 50, 50))
-            .add_modifier(Modifier::BOLD),
-    ));
+    // Add view source indicator only when not the default
+    if view_source != ViewSource::Original {
+        let (source_label, source_color) = match view_source {
+            ViewSource::Original => unreachable!(),
+            ViewSource::Previous => ("PREV", Color::Yellow),
+            ViewSource::All => ("ALL", Color::Cyan),
+        };
+        spans.push(Span::raw(" "));
+        // Simple tag style: muted bg with colored text
+        spans.push(Span::styled(
+            format!(" {} ", source_label),
+            Style::default()
+                .fg(source_color)
+                .bg(Color::Rgb(50, 50, 50))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     Line::from(spans)
 }
