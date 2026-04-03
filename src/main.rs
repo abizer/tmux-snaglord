@@ -12,6 +12,7 @@ use std::io;
 mod action;
 mod app;
 mod config;
+mod json_highlight;
 mod parser;
 mod presets;
 mod tmux;
