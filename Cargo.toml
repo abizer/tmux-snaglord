@@ -16,12 +16,12 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 # TUI stack
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.29"
 # Parsing
 regex = "1.10"
 strip-ansi-escapes = "0.2"
-ansi-to-tui = "7"
+ansi-to-tui = "8"
 # Fuzzy search
 fuzzy-matcher = "0.3"
 # JSON parsing
