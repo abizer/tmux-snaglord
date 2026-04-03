@@ -293,6 +293,22 @@ fn get_action(key: KeyEvent, app: &App) -> Option<Action> {
     }
 }
 
+fn lookup_preset(name: &str, context: &str) -> Result<String> {
+    presets::get_by_name(name)
+        .map(|p| p.regex.to_string())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown preset '{}'{context}. Available: {}",
+                name,
+                presets::PRESETS
+                    .iter()
+                    .map(|p| p.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+}
+
 /// Resolve prompt pattern with precedence: CLI prompt > CLI preset > Config prompt > Config preset > Default
 fn resolve_prompt_pattern(args: &RunArgs, config: &config::Config) -> Result<String> {
     // 1. CLI explicit regex (highest priority)
@@ -302,19 +318,7 @@ fn resolve_prompt_pattern(args: &RunArgs, config: &config::Config) -> Result<Str
 
     // 2. CLI preset (fatal if invalid - user explicitly requested it)
     if let Some(name) = &args.preset {
-        return presets::get_by_name(name)
-            .map(|p| p.regex.to_string())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Unknown preset '{}'. Available: {}",
-                    name,
-                    presets::PRESETS
-                        .iter()
-                        .map(|p| p.name)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            });
+        return lookup_preset(name, "");
     }
 
     // 3. Config explicit regex
@@ -324,19 +328,7 @@ fn resolve_prompt_pattern(args: &RunArgs, config: &config::Config) -> Result<Str
 
     // 4. Config preset (fatal if invalid)
     if let Some(name) = &config.preset {
-        return presets::get_by_name(name)
-            .map(|p| p.regex.to_string())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Unknown preset '{}' in config. Available: {}",
-                    name,
-                    presets::PRESETS
-                        .iter()
-                        .map(|p| p.name)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            });
+        return lookup_preset(name, " in config");
     }
 
     // 5. No configuration found
