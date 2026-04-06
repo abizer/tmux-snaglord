@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.6 (2026-04-06)
+
+- Fix identical commands run multiple times being collapsed into one entry
+
 ## v0.1.5 (2026-04-03)
 
 - Add help overlay showing keybindings, triggered by `?` key
