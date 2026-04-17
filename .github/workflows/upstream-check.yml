@@ -1,0 +1,78 @@
+name: upstream-check
+
+# Daily: check if upstream (raine/tmux-snaglord) has commits we don't,
+# and open/update an issue if so. The actual sync (git rebase upstream/main)
+# is done manually via the `fork-sync` fish function — silent auto-rebases
+# to main are too surprising.
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # 13:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/raine/tmux-snaglord.git
+          git fetch upstream main
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          set -euo pipefail
+          count=$(git rev-list --count HEAD..upstream/main)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -gt 0 ]; then
+            {
+              echo "body<<COMMITS_EOF"
+              echo "Upstream has **$count** new commit(s) not on our main."
+              echo
+              echo "Run \`fork-sync\` locally to rebase and push, or check conflicts first:"
+              echo
+              echo "\`\`\`"
+              git log --oneline --no-decorate HEAD..upstream/main | head -30
+              echo "\`\`\`"
+              echo
+              echo "Workflow: \`.github/workflows/upstream-check.yml\`"
+              echo "COMMITS_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update issue
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.check.outputs.body }}
+        run: |
+          set -euo pipefail
+          title="upstream has $(echo "${{ steps.check.outputs.count }}") new commit(s) to rebase"
+          # Find any existing open issue with the upstream-sync label
+          existing=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$BODY"
+          else
+            # Create the label if missing (ignore failure if already exists)
+            gh label create upstream-sync --color ededed --description "New upstream commits to rebase" 2>/dev/null || true
+            gh issue create --title "$title" --body "$BODY" --label upstream-sync
+          fi
+
+      - name: Close stale sync issue if caught up
+        if: steps.check.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Caught up with upstream. Closing."
+          fi
