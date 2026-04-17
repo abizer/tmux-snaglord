@@ -1,9 +1,12 @@
 name: cache
 
 on:
+  # Trigger on pushes to any branch — only the repo owner can push, so every
+  # run is trusted. We intentionally do NOT trigger on pull_request: even
+  # though GitHub strips most secrets from fork PRs, running untrusted code
+  # on our runner is still wasted compute and a misconfiguration away from
+  # leaking CACHIX_AUTH_TOKEN.
   push:
-    branches: [main, master]
-  pull_request:
   workflow_dispatch:
 
 jobs:
