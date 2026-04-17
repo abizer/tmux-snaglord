@@ -1,0 +1,42 @@
+name: cache
+
+on:
+  # Trigger on pushes to any branch — only the repo owner can push, so every
+  # run is trusted. We intentionally do NOT trigger on pull_request: even
+  # though GitHub strips most secrets from fork PRs, running untrusted code
+  # on our runner is still wasted compute and a misconfiguration away from
+  # leaking CACHIX_AUTH_TOKEN.
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build tmux-snaglord (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+          - runner: macos-latest
+            system: aarch64-darwin
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: abizer
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - run: nix build .#packages.${{ matrix.system }}.default --print-out-paths
+
+      # cachix-action's async daemon sometimes drains before it finishes
+      # pushing the final build output — the big one. Push it explicitly
+      # so we always get it cached.
+      - run: cachix push abizer result
