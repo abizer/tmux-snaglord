@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.7 (2026-04-20)
+
+- Add support for multi-line shell prompts via the `prompt_lines` config option
+  ([#5](https://github.com/raine/tmux-snaglord/pull/5))
+- Fix `init` command silently overwriting unrelated user config settings when
+  re-run
+
 ## v0.1.6 (2026-04-06)
 
 - Fix identical commands run multiple times being collapsed into one entry
