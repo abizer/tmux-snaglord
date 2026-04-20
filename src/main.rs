@@ -106,12 +106,9 @@ fn run_init(target: Option<&str>) -> Result<()> {
         Some((preset, count)) => {
             eprintln!("\nDetected '{}' ({} commands)", preset.name, count);
 
-            let config = config::Config {
-                preset: Some(preset.name.to_string()),
-                prompt: None,
-                nerd_fonts: None,
-                prompt_lines: None,
-            };
+            let mut config = config::Config::load().unwrap_or_default();
+            config.preset = Some(preset.name.to_string());
+            config.prompt = None;
 
             let path = config.save()?;
             eprintln!("Saved to {}", path.display());
